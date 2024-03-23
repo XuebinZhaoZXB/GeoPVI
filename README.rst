@@ -9,6 +9,9 @@ Author
 ----------
  - Xuebin Zhao <xuebin.zhao@ed.ac.uk>
 
+Requirements
+--------------
+numpy, torch, cython, dask, scipy
 
 References
 ----------
