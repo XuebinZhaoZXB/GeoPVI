@@ -128,9 +128,12 @@ if __name__ == "__main__":
     current_time = now.strftime("%Y-%m-%d %H:%M:%S")
     print(f'Start VI at {current_time}...\n')
     print(f'Project basepath is {args.basepath}')
-    print(f'Output folder is {args.outdir}\n')
+    print(f'Output folder is basepath/{args.outdir}\n')
 
-    print(f'Transform (flow) used: {args.nflow} {args.flow} flows')
+    if args.nflow == 1:
+        print(f'Transform (flow) used: {args.nflow} {args.flow} flow')
+    else:
+        print(f'Transform (flow) used: {args.nflow} {args.flow} flows')
     if args.flow == 'Linear':
         print(f'Covariance of Gaussian kernel is: {args.kernel}')
         if args.kernel == 'structured':
@@ -138,7 +141,7 @@ if __name__ == "__main__":
     print(f'The initial distribution is {args.ini_dist} distribution\n')
 
     ## define FWI config
-    print(f'Config file for FWI is: {args.fwi_config}')
+    print(f'Config file for FWI is: basepath/input/{args.fwi_config}')
     fwi_config_name = args.basepath + 'input/' + args.fwi_config
     config = configparser.ConfigParser()
     config._interpolation = configparser.ExtendedInterpolation()
@@ -200,7 +203,7 @@ if __name__ == "__main__":
         # load initial value for flows
         filename = os.path.join(args.basepath, 'input/', args.flow_init_name)
         param = np.load(filename).flatten()
-        print(f'Load {filename} as initial parameter value for flows model')
+        print(f'Load basepath/input/{args.flow_init_name} as initial parameter value for flows model')
     if args.flow == 'Linear':
         cov_template = np.ones((args.kernel_size, args.kernel_size, args.kernel_size))
         off_diag_mask = get_offdiag_mask(cov_template, ndim, nx = nx, ny = ny, nz = nz - water_layer)
