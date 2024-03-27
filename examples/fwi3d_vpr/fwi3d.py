@@ -96,7 +96,7 @@ if __name__ == "__main__":
     argparser.add_argument("--lr", default=0.005, type=float)
     argparser.add_argument("--ini_dist", default='Normal', type=str)
     
-    argparser.add_argument("--smooth", default=True, type=bool)
+    argparser.add_argument("--smooth", default=False, type=bool)
     argparser.add_argument("--smoothx", default=1000, type=float)
     argparser.add_argument("--smoothy", default=1000, type=float)
     argparser.add_argument("--smoothz", default=1000, type=float)
@@ -104,8 +104,6 @@ if __name__ == "__main__":
     argparser.add_argument("--prior_type", default='Uniform', type=str)
     argparser.add_argument("--prior_param", default='Uniform_prior.txt', type=str)
     argparser.add_argument("--fwi_config", default='config_highfreq.ini', type=str, help='configure file for FWI')
-    # argparser.add_argument("--flow_init_name", type=str, default='Linear_structured_ite300_parameter_midf_nos.npy', 
-    #                             help='Parameter filename for flow initial value')
     argparser.add_argument("--flow_init_name", type=str, default='Linear_structured_ite800_parameter_highf_nos.npy', 
                                 help='Parameter filename for flow initial value')
     argparser.add_argument("--outdir", type=str, default='output/smooth_1/', 
