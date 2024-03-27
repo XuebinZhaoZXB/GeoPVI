@@ -7,7 +7,7 @@
 # ignore folders for prior tests
 fwi2d_geol_prior/
 fwi2d_smooth/
-examples/fwi3d_vpr/fwi3d.py
+/examples/fwi3d_vpr/fwi3d.py
 **/fwi3d_bp/
 
 # 3D FWI code related
