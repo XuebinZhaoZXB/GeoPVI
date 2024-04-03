@@ -23,6 +23,7 @@ fwi3d_vpr/
 *.so
 *.a
 *.o
+*.log
 
 **.vscode
 **/pytest_cache/
