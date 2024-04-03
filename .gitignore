@@ -8,10 +8,10 @@
 fwi2d_geol_prior/
 fwi2d_smooth/
 /examples/fwi3d_vpr/fwi3d.py
-**/fwi3d_bp/
 
 # 3D FWI code related
 **/*tdwi*/
+**/*tdwi*
 
 # some .npy files (data or input parameters)
 *.npy
