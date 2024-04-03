@@ -18,14 +18,16 @@ Installation
 ------------
 
 In the ``GeoPVI`` folder, run
-
 .. code-block:: sh
+
     sh setup.sh install
 
 If you don't have permission to install GeoPVI into your Python environment, simply replace 
 
 .. code-block:: sh
+
     pip install --user -e .
+
 in ``setup.sh``.
 
 We recommend to install GeoPVI in an editable mode. Alternatively, if you do not want to install the package, simply do
