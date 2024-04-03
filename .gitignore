@@ -7,14 +7,16 @@
 # ignore folders for prior tests
 fwi2d_geol_prior/
 fwi2d_smooth/
-fwi3d_geol_prior/
+fwi3d_vpr/
 **/fwi3d_bp/
 
 # 3D FWI code related
 **/*tdwi*/
+**/*tdwi*
 
 # some .npy files (data or input parameters)
 *.npy
+*.log
 
 
 ### Development environment
