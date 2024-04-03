@@ -18,7 +18,6 @@ Installation
 ------------
 
 In the ``GeoPVI`` folder, run
-.. code-block:: sh
 
     sh setup.sh install
 
