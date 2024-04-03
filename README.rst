@@ -19,6 +19,8 @@ Installation
 
 In the ``GeoPVI`` folder, run
 
+.. code-block:: sh
+
     sh setup.sh install
 
 If you don't have permission to install GeoPVI into your Python environment, simply replace 
