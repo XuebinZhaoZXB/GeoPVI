@@ -101,8 +101,7 @@ if __name__ == "__main__":
     argparser.add_argument("--ini_dist", default='Normal', type=str)
     # argparser.add_argument("--sigma", default=2e-8, type=float)
     # argparser.add_argument("--sigma", default=6e-8, type=float)
-    # argparser.add_argument("--sigma", default=2e-7, type=float)
-    argparser.add_argument("--sigma", default=1.25e-7, type=float)
+    argparser.add_argument("--sigma", default=2e-7, type=float)
 
     argparser.add_argument("--smooth", default=False, type=bool)
     argparser.add_argument("--smoothx", default=1000, type=float)
@@ -114,7 +113,7 @@ if __name__ == "__main__":
     argparser.add_argument("--fwi_config", default='config_highfreq.ini', type=str, help='configure file for FWI')
     argparser.add_argument("--flow_init_name", type=str, default='Linear_structured_ite300_parameter_midf_nos.npy', 
                                 help='Parameter filename for flow initial value')
-    argparser.add_argument("--outdir", type=str, default='output/psvi_highf_smooth_nos2/', 
+    argparser.add_argument("--outdir", type=str, default='output/psvi_highf_nos/', 
                                 help='Folder for inversion results')
     
     argparser.add_argument("--verbose", default=True, type=bool, help='Output intermediate results')
