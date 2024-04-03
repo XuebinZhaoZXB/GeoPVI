@@ -105,8 +105,8 @@ class Normal():
         smooth_matrix (scipy sparse): smooth matrix applied on model samples, used to define smooth prior pdf
         Note: only one of std, covariance or precision or scale_tril can be specified
         '''
-        self.loc = torch.from_numpy(param1)
-        self.dim = param1.size
+        self.loc = torch.from_numpy(loc)
+        self.dim = loc.size
         self.inverse = inverse
         # check which option is provided as the second parameter of the Normal distribution
         if (covariance is not None) + (scale_tril is not None) + (precision is not None) + (std is not None) != 1:
