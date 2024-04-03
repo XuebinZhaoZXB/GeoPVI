@@ -49,6 +49,7 @@ See examples in ``examples`` folder.
 Specifically for BP HPC server
 -------------------------------
 GeoPVI are tested using ``intel-2019`` and ``intel-2020`` conda environments.
+To run 3D FWi with BP's server and the ``tdwi`` solver, please use codes in ``geopvi/fwi3d_bp`` rather than ``geopvi/fwi3d``.
 
 
 Examples
