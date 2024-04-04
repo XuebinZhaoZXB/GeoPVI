@@ -10,11 +10,12 @@ import configparser
 import time
 from datetime import datetime
 
-from geopvi.prior import Uniform, Normal
+
+from geopvi.prior import Uniform, Normal, Gaussian
 from geopvi.vi.models import VariationalModel
 from geopvi.vi.flows import *
-from geopvi.fwi3d.posterior import Posterior
-import geopvi.fwi3d.dask_utils as du 
+from posterior import Posterior
+
 
 
 def delta(n):
@@ -38,12 +39,6 @@ def smooth_matrix(nx, ny, nz, smoothx, smoothy, smoothz):
     L = sparse.vstack([Sx,Sy,Sz])
     return L
 
-def init_vfwi(args, config):
-    Path(args.basepath + args.outdir).mkdir(parents=True, exist_ok=True)
-    Path(config.get('path', 'inpath')).mkdir(parents=True, exist_ok=True)
-    Path(config.get('path', 'outpath')).mkdir(parents=True, exist_ok=True)
-    Path(config.get('dask', 'daskpath')).mkdir(parents=True, exist_ok=True)
-
 def get_offdiag_mask(correlation, ndim, nx = 1, ny = 1, nz = 1):
     y, x, z = correlation.shape
     rank = (correlation != 0).sum() // 2
@@ -63,10 +58,10 @@ def get_offdiag_mask(correlation, ndim, nx = 1, ny = 1, nz = 1):
                 i += 1
     return mask
 
-def gen_sample(n = 1, dim = 1, para1 = 0., para2 = 1., ini = 'Normal'):
+def gen_sample(n = 512, dim = 1, para1 = 0., para2 = 1., ini = 'Normal'):
     """
     The initial distribution: q_0(z_0)
-    (Often a known simple and analytically known distribution, like Uniform or Standard Gaussian)
+    (Often a known simple distribution, e.g., a Uniform or Standard Gaussian)
     """
     if ini == 'Normal':
         return np.random.normal(0., 1., size = (n, dim))
@@ -76,6 +71,7 @@ def gen_sample(n = 1, dim = 1, para1 = 0., para2 = 1., ini = 'Normal'):
 
 def get_flow_param(flow):
     mus = flow.u.detach().numpy()
+    # sigmas = np.log(np.exp(flow.diag.detach().numpy()) + 1)
     sigmas = np.exp(flow.diag.detach().numpy())
     if flow.non_diag is None:
         return np.hstack([mus, sigmas])
@@ -85,20 +81,21 @@ def get_flow_param(flow):
 
 
 if __name__ == "__main__":
-    argparser = ArgumentParser(description='3D Bayesian Full waveform Inversion using GeoVI')
+    argparser = ArgumentParser(description='Variational prior replaceemtn for 3D Bayesian FWI')
     argparser.add_argument("--basepath", metavar='basepath', type=str, help='Project path',
-                            default='/home/user/GeoPVI/examples/fwi3d/')
+                            default='/lustre03/other/2029iw/study/00_GeoPVI/examples/fwi3d_vpr/')
 
     argparser.add_argument("--flow", default='Linear', type=str)
+    argparser.add_argument("--vpr_step", default=2, type=int, help = '1st or 2nd step for 3D VPR')
     argparser.add_argument("--kernel", default='structured', type=str)
     argparser.add_argument("--kernel_size", default=5, type=int)
     argparser.add_argument("--nflow", default=1, type=int)
-    argparser.add_argument("--nsample", default=5, type=int)
+    argparser.add_argument("--nsample", default=10, type=int)
+    argparser.add_argument("--prcs", default=10, type=int)
     argparser.add_argument("--iterations", default=1000, type=int)
     argparser.add_argument("--lr", default=0.005, type=float)
     argparser.add_argument("--ini_dist", default='Normal', type=str)
-    argparser.add_argument("--sigma", default=2e-7, type=float)
-
+    
     argparser.add_argument("--smooth", default=False, type=bool)
     argparser.add_argument("--smoothx", default=1000, type=float)
     argparser.add_argument("--smoothy", default=1000, type=float)
@@ -106,21 +103,20 @@ if __name__ == "__main__":
 
     argparser.add_argument("--prior_type", default='Uniform', type=str)
     argparser.add_argument("--prior_param", default='Uniform_prior.txt', type=str)
-    argparser.add_argument("--fwi_config", default='config.ini', type=str, help='configure file for FWI')
-    argparser.add_argument("--flow_init_name", type=str, default='none', 
+    argparser.add_argument("--fwi_config", default='config_highfreq.ini', type=str, help='configure file for FWI')
+    argparser.add_argument("--flow_init_name", type=str, default='Linear_structured_ite800_parameter_highf_nos.npy', 
                                 help='Parameter filename for flow initial value')
-    argparser.add_argument("--outdir", type=str, default='output/', 
+    argparser.add_argument("--outdir", type=str, default='output/smooth_1/', 
                                 help='Folder for inversion results')
-    
+
     argparser.add_argument("--verbose", default=True, type=bool, help='Output intermediate results')
     argparser.add_argument("--save_intermediate_result", default=True, type=bool,
                                 help='Whether save intermediate training model, for resume from previous training')
     argparser.add_argument("--resume", default=False, type=bool, help='Resume previous training')
-    argparser.add_argument("--output_interval", default=100, type=int, help='frequency for output model parameters')
-
+    argparser.add_argument("--output_interval", default=200, type=int, help='frequency for output model parameters')
 
     args = argparser.parse_args()
-    
+
     # set PyTorch default dtype to float64 to match numpy dtype
     torch.set_default_dtype(torch.float64)
 
@@ -147,7 +143,8 @@ if __name__ == "__main__":
     config._interpolation = configparser.ExtendedInterpolation()
     config.read(fwi_config_name)
 
-    init_vfwi(args, config)
+    # create output folder
+    Path(args.basepath + args.outdir).mkdir(parents=True, exist_ok=True)
 
     ## define FWI parameters
     nx = config.getint('FWI','nx')
@@ -157,19 +154,7 @@ if __name__ == "__main__":
     ndim = (nz - water_layer) * nx * ny
 
     print(f'FWI model size: ny = {ny}, nx = {nx}, nz = {nz}')
-    print(f'Dimensionality of the problem: {ndim} ')
-    print(f'Data noise is: {args.sigma}\n')
-
-    # masked is defined to fix velocity values at their true values within the water layer 
-    mask = np.full([ny, nx, nz], True)
-    mask[:,:,:water_layer] = False
-
-    # define dask cluster for parallelisation computation
-    daskpath = config.get('dask','daskpath')
-    print(f'Create dask cluster at: {daskpath}\n')
-    cluster, client = du.dask_init(config.get('dask','pe'), config.getint('dask','nnodes'),
-                                   nworkers=config.getint('dask','nworkers'),
-                                   ph=config.getint('dask','ph'), odask=daskpath)
+    print(f'Dimensionality of the problem: {ndim}\n')
 
     # define Bayesian prior and posterior pdf
     prior_bounds = np.loadtxt(args.basepath + 'input/' + args.prior_param)
@@ -193,16 +178,77 @@ if __name__ == "__main__":
         # prior = Normal()
     else:
         raise NotImplementedError("Not supported Prior distribution")
-    print(f'Prior distribution is: {args.prior_type}')
-    posterior = Posterior(args, config, log_prior = prior.log_prob, mask = mask.flatten(), client = client)
+    print(f'Prior distribution is: {args.prior_type}\n')
+
+
+    # # load geological prior pdf: Gaussian pdf in this example
+    # parampath = '/lustre03/other/2029iw/study/02_FWI_aco3d_syn/NFVI/a_code/examples/'
+    # name = os.path.join(args.basepath, 'input/gaussian_prior_cor_inverse_y10_x10_z8.npy')
+    # # name = os.path.join(args.basepath, 'input/gaussian_prior_cor_inverse_z8_x10_y10_reverse_smoothness.npy')
+    # gaussian_prior_param = np.load(name)
+    # name = os.path.join(args.basepath, 'input/fwi_mean_std.npy')
+    # fwi_mean_std = np.load(name)
+
+    # prior = Prior(param1 = (lower + upper)/2, param2 = np.sqrt((upper - lower)**2/12), param3 = gaussian_prior_param, 
+    #                 param2_type = 'local_cor', prior_type = args.prior_type, smooth_matrix = L)
+    # prior = Prior(param1 = fwi_mean_std[0], param2 = fwi_mean_std[1]*7, param3 = gaussian_prior_param, 
+    #                 param2_type = 'local_cor', prior_type = args.prior_type, smooth_matrix = L)
+
+    name = os.path.join(args.basepath, 'input/Linear_structured_ite800_parameter_highf_nos.npy')
+    param = np.load(name).flatten()
+
+    diags = param[ndim:].reshape(-1, ndim)
+    offset = (diags == 0).sum(axis = 1)
+
+    correlation_kernel = np.zeros([5,5,5])
+    correlation_kernel[:,2,2] = 1
+    correlation_kernel[2,2,:] = 1
+    correlation_kernel[2,:,2] = 1
+    off_diag_mask = get_offdiag_mask(correlation_kernel, ndim, nx = nx, ny = ny, nz = nz - water_layer)
+    diags_3 = np.zeros(off_diag_mask.shape)
+    for i in range(diags_3.shape[0]):
+        offset_i = (off_diag_mask[i] == 0).sum()
+        index = np.where(offset == offset_i)[0][0]
+        diags_3[i] = diags[index]
+    
+    # diags_3 = diags[1:].copy()
+    # diags_3[np.abs(diags[1:]) < 0.001] = 0
+    param_new = np.zeros((2+diags_3.shape[0]) * ndim)
+    param_new[:2*ndim] = param[:2*ndim]
+    param_new[2*ndim:] = diags_3.flatten()
+    # param_new = param_new[:2*ndim]
+    # print(diags_3.shape)
+        
+    if args.vpr_step == 1:
+        posterior_kernel = 'diagonal'
+    elif args.vpr_step == 2:
+        posterior_kernel = 'structured'
+    else:
+        raise NotImplementedError("Not supported vpr_step: VPR step only suooprt 1 or 2")
+    posterior = Posterior(param_new, lower, upper, log_prior = prior.log_prob,
+                                kernel = posterior_kernel, cov_inverse = False)
 
     # define flows model
+    # # First run ADVI prior replacement, using inversion results from old prior, 
+    # # start from last frequency band where old prior is started (initialised)
+    # parampath = '/lustre03/other/2029iw/study/02_FWI_aco3d_syn/NFVI/test_5sdata/'
+    # name = parampath + 'test0/output/ADVI_ite400_8samples_parameter_midfreq_lowrank.npy'
+    # param_mf = np.load(name).flatten()
+
+    # # # Then run PSVI prior replacement, using inversion results from ADVI with replacement
+    # # parampath = '/lustre03/other/2029iw/study/02_FWI_aco3d_syn/NFVI/a_code/examples/'
+    # # # name = parampath + 'fwi3d_geol_prior/output/Linear_diagonal_highf_geological_parameter.npy'
+    # # name = parampath + 'fwi3d_geol_prior/output/Linear_diagonal_highf_geological_reverse_smooth_new_parameter.npy'
+    # # param_mf = np.load(name)
+    # # param_mf[ndim:] *= 1.
+    
     flow = eval(args.flow)
     param = None
     if args.flow_init_name != 'none':
         # load initial value for flows
         filename = os.path.join(args.basepath, 'input/', args.flow_init_name)
         param = np.load(filename).flatten()
+        # param[ndim:] *= 1.
         print(f'Load basepath/input/{args.flow_init_name} as initial parameter value for flows model')
     if args.flow == 'Linear':
         cov_template = np.ones((args.kernel_size, args.kernel_size, args.kernel_size))
@@ -306,8 +352,6 @@ if __name__ == "__main__":
                 'optimizer_state_dict': optimizer.state_dict(),
                 'loss': loss_his,
                 }, name)
-
-    du.dask_del(cluster, client, odask=daskpath)
 
     # # save posterior samples from trained model
     # x = torch.as_tensor(gen_sample(2000, ndim, para1 = lower, para2 = upper, ini=args.ini_dist))
