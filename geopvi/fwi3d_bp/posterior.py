@@ -114,18 +114,24 @@ def run_fwi_i(i, argument, config, mask):
 
     #print(*args, sep=" ")
     try:
-        subprocess.check_output(args, stderr=subprocess.STDOUT, shell=False, timeout=1200)
+        subprocess.check_output(args, stderr=subprocess.STDOUT, shell=False, timeout=3600)
     except subprocess.CalledProcessError as e:
         print(e.output)
     except subprocess.TimeoutExpired:
-        subprocess.check_output(args, stderr=subprocess.STDOUT, shell=False, timeout=1200)
+        subprocess.check_output(args, stderr=subprocess.STDOUT, shell=False, timeout=3600)
 
-    grad = io.fromfile(os.path.join(outpath,'gradout.'+str(i)))['Samples']
     loss = read_loss(os.path.join(print_path,'printout.'+str(i)))
     if(loss<0):
         loss = cal_loss(os.path.join(outpath,'ures.'+str(i)))
 
-    grad = grad.flatten()[mask]
+    # tdfwimod: Set to 1 to just do synthetic modeling, and not  inversion.   Default=0.
+    # if synthetic modeling, then set grad as None to save memory
+    # output_grad: whether to output gradient of velocity or not
+    output_grad = bool(1 - config.getint('FWI','tdfwimod'))
+    grad = None
+    if output_grad:
+        grad = io.fromfile(os.path.join(outpath,'gradout.'+str(i)))['Samples']
+        grad = grad.flatten()[mask]
     return loss, grad
 
 
@@ -192,8 +198,6 @@ class Posterior():
 
         # convert x from torch.tensor to np.ndarray and get parameters needed for optimisation
         m, _ = x.shape
-        loss = np.zeros(m)
-        grad = np.zeros(x.shape)
         if not isinstance(x, np.ndarray):
             x = x.detach().numpy().astype(np.float64)
         vel = np.broadcast_to(self.vel_water[None], (m, ny, nx, nz)).reshape(m, -1)
@@ -214,19 +218,28 @@ class Posterior():
             futures.append( self.client.submit(run_fwi_i, i, self.args, self.config, self.mask, pure=False))
         results = self.client.gather(futures)
 
+        loss = np.zeros(m)            
         for i in range(m):
-            loss[i] = results[i][0]
-            grad[i] = results[i][1]
-        grad = 2 * grad / (x**3)
+            loss[i] = results[i][0] * scale
+            
+        # tdfwimod: Set to 1 to just do synthetic modeling, and not  inversion.   Default=0.
+        # if synthetic modeling, then set grad as None to save memory
+        # output_grad: whether to output gradient of velocity or not
+        output_grad = bool(1 - self.config.getint('FWI','tdfwimod'))
+        grad = None
+        if output_grad:
+            grad = np.zeros(x.shape)
+            for i in range(m):
+                grad[i] = results[i][1]
+            grad = 2 * grad / (x**3) * scale
     
-        # # clip the grad to avoid numerical instability
-        # clip = self.sigma**2 * self.config.getfloat('FWI','gclipmax')
-        # #clip = clip * np.quantile(np.abs(grad),0.999)
-        # grad[grad>=clip] = clip
-        # grad[grad<=-clip] = -clip
+            # # clip the grad to avoid numerical instability
+            # clip = self.sigma**2 * self.config.getfloat('FWI','gclipmax')
+            # #clip = clip * np.quantile(np.abs(grad),0.999)
+            # grad[grad>=clip] = clip
+            # grad[grad<=-clip] = -clip
 
-        # return 0.5 * loss, grad
-        return 0.5 * loss * scale, grad * scale
+        return 0.5 * loss, grad
 
     def log_prob(self, x):
         """
