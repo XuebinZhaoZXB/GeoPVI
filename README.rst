@@ -48,7 +48,7 @@ See examples in ``examples`` folder.
 
 Variational Inversion
 ---------------------
-Inversion implement details can be found in the user manual in ``doc`` folder.
+Inversion implementation details can be found in the user manual in ``doc`` folder.
 
 
 Specifically for BP HPC server
