@@ -46,6 +46,11 @@ Then, you need to tell scripts which use the GeoPVI package where the package is
 See examples in ``examples`` folder. 
 
 
+Variational Inversion
+---------------------
+Inversion implement details can be found in the user manual in ``doc`` folder.
+
+
 Specifically for BP HPC server
 -------------------------------
 GeoPVI are tested using ``intel-2019`` and ``intel-2020`` conda environments.

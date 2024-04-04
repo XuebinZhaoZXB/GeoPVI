@@ -4,11 +4,13 @@
 # bash file 
 **/bash/
 
-# ignore folders for prior tests
+# ignore example folders
 fwi2d_geol_prior/
 fwi2d_smooth/
-# fwi3d_vpr/
+fwi3d_vpr/
 # **/fwi3d_bp/
+
+geopvi/prior_vpr.py
 
 # 3D FWI code related
 **/*tdwi*/
