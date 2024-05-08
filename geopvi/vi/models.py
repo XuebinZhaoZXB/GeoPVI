@@ -29,7 +29,7 @@ class VariationalModel(nn.Module):
             log_det += ld
         x = z
         return x, log_det
-
+ 
     def sample(self, x):
         for flow in self.flows:
             x, _ = flow.forward(x, train = False)
