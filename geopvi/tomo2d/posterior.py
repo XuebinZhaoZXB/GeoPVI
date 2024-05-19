@@ -1,10 +1,9 @@
 import numpy as np
 import torch
-import torch.nn as nn
 from torch.multiprocessing import Pool
 from torch.autograd import Function
 
-from fmm.fmm import fm2d
+from geopvi.tomo2d.fmm import fm2d
 
 class ForwardModel(Function):
     @staticmethod
@@ -21,26 +20,26 @@ class ForwardModel(Function):
 
 
 class Posterior():
-    def __init__(self, data, src, rec, mask, sigma=0.05, nx=16, ny=16, 
-                    xmin=-4, ymin=-4, dx=0.5, dy=0.5, gdx=2, gdy=2, sdx=4, sext=4, 
-                    lower = np.NINF, upper = np.PINF, dim = 1, num_processes = 1):
+    def __init__(self, data, config, src, rec, mask = None, sigma=0.05, lower = np.NINF, upper = np.PINF, 
+                        num_processes = 1, log_prior = None):
         self.lower = lower
         self.upper = upper
-        self.dim = dim
         self.num_processes = num_processes
+        self.log_prior = log_prior
 
         self.data = data
         self.sigma = torch.tensor(sigma)
-        self.nx = nx
-        self.ny = ny
-        self.xmin = xmin
-        self.ymin = ymin
-        self.dx = dx
-        self.dy = dy
-        self.gdx = gdx
-        self.gdy = gdy
-        self.sdx = sdx
-        self.sext = sext
+
+        self.nx = config.getint('FMM','nx')
+        self.ny = config.getint('FMM','ny')
+        self.xmin = config.getfloat('FMM','xmin')
+        self.ymin = config.getfloat('FMM','ymin')
+        self.dx = config.getfloat('FMM','dx')
+        self.dy = config.getfloat('FMM','dy')
+        self.gdx = config.getint('FMM','gdx')
+        self.gdy = config.getint('FMM','gdy')
+        self.sdx = config.getint('FMM','sdx')
+        self.sext = config.getint('FMM','sext')
 
         self.mask = np.ascontiguousarray(mask)
         self.src = src
@@ -79,9 +78,9 @@ class Posterior():
         '''
         Calculate modelled data and data-model gradient by solving forward function
         '''
-        m = x.shape[0]
+        m, n = x.shape
         time = np.zeros([m, self.data.shape[0]])
-        dtdv = np.zeros([m, self.data.shape[0], self.dim])
+        dtdv = np.zeros([m, self.data.shape[0], n])
         for i in range(m):
             vel = x.data.numpy()[i].squeeze().astype(np.float64)
             time[i], dtdv[i] = fm2d(vel, self.srcx, self.srcy, self.recx, self.recy, self.mask,
@@ -93,9 +92,9 @@ class Posterior():
         '''
         Parallelised version of self.fmm using torch.multiprocessing
         '''
-        m = x.shape[0]
+        m, n = x.shape
         time = np.zeros([m, self.data.shape[0]])
-        dtdv = np.zeros([m, self.data.shape[0], self.dim])
+        dtdv = np.zeros([m, self.data.shape[0], n])
 
         pool = Pool(processes = self.num_processes)
         results = pool.map(self.solver, [x.detach().numpy()[i].squeeze().astype(np.float64) for i in range(m)])
@@ -118,4 +117,5 @@ class Posterior():
         else:
             d_syn = ForwardModel.apply(x, self.fmm_parallel)
         log_like = - 0.5 * torch.sum(((torch.from_numpy(self.data) - d_syn)/self.sigma) ** 2, axis = -1)
-        return log_like
+        logp = log_like + self.log_prior(x)
+        return logp
