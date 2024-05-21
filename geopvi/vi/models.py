@@ -66,7 +66,7 @@ class VariationalModel(nn.Module):
 
 class VariationalInversion():
     '''
-    A class that performs variationa inversion by maximising ELBO 
+    A class that performs variational inversion by maximising ELBO 
     or minimising KL divergence between variationa and posterior distributions
     '''
     def __init__(self, variationalModel, log_posterior):
@@ -99,7 +99,7 @@ class VariationalInversion():
             optimizer = torch.optim.Adam(self.variationalModel.parameters(), lr = lr)
         if verbose:
             print('----------------------------------------\n')
-            
+
         start = time.time()
         for i in range(n_iter):
             x = self.variationalModel.sample_from_base(nsample)
