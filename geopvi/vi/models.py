@@ -19,20 +19,35 @@ class VariationalModel(nn.Module):
         '''
         super().__init__()
         self.flows = nn.ModuleList(flows)
-        self.base_dist = base_dist
+        if base_dist == 'Uniform' or base_dist == 'Normal':
+            self.base_dist = base_dist
+        else:
+            raise NotImplementedError("Base distribution provided not currently supported")
+        for flow in flows:
+            if hasattr(flow, 'dim'):
+                self.dim = flow.dim
+                break
+    
+    def _log_prob_base(self, x):
+        if self.base_dist == 'Normal':
+            return -0.5 * self.dim * np.log(2*np.pi) - 0.5 * (x**2).sum(axis = 1)
+        elif self.base_dist = 'Uniform':
+            return torch.zeros(x.shape[0])
 
-    # def _sample_base_pdf(self, nsamples, dim = 1):
-    #     if self.base_dist == 'Normal'
-    #         return torch.randn(nsamples, )
+    def sample_from_base(self, nsamples):
+        if self.base_dist == 'Normal':
+            return torch.randn(nsamples, self.dim)
+        elif self.base_dist = 'Uniform':
+            return torch.rand(nsamples, self.dim)
 
     def forward(self, x):
         m, _ = x.shape
         log_det = torch.zeros(m)
+        logq0 = self._log_prob_base(x)
         for flow in self.flows:
             x, ld = flow.forward(x)
             log_det += ld
-        z = x
-        return z, log_det
+        return x, logq0 - log_det
 
     def inverse(self, z):
         m, _ = z.shape
@@ -48,35 +63,22 @@ class VariationalModel(nn.Module):
             x, _ = flow.forward(x, train = False)
         return x
 
-    # def update(self, log_prob, optimizer, n_iter = 1000, nsample = 4, start_ite = 0, noutput = 1, verbose = True):
-    #     start = time.time()
-    #     for i in range(start_ite, n_iter):
-    #         optimizer.zero_grad()
-    #         # model.train()
-    #         x = torch.as_tensor(gen_sample(nsample, ndim, para1 = lower, para2 = upper, ini=args.ini_dist))
-    #         z, log_det = self.forward(x)
-    #         logp = posterior.log_prob(z)
-
-    #         loss = -torch.mean(logp + log_det) # mean: Expectation term using Monte Carlo
-    #         loss.backward()
-    #         optimizer.step()
-    #         loss_his.append(loss.data.numpy())
-
 
 class VariationalInversion():
     '''
     A class that performs variationa inversion by maximising ELBO 
     or minimising KL divergence between variationa and posterior distributions
     '''
-    def __init__(self, variational, log_posterior):
+    def __init__(self, variationalModel, log_posterior):
         '''
-        variational: a class that defines the variational distribution (variational model)
+        variationalModel: a class that defines the variational distribution (variational model)
         log_post: a function that calculates unnormalised posterior probability value for any given model sample
         '''
         self.log_posterior = log_posterior
-        self.variational_dist = variational
+        self.variationalModel = variationalModel
 
-    def update(self, optimizer = None, lr = 0.001, n_iter = 1000, nsample = 4, n_out = 1, verbose = True):
+    def update(self, optimizer = None, lr = 0.001, n_iter = 1000, nsample = 1, n_out = 1, 
+                    verbose = True, save_intermediate_result = True):
         '''
         Update variational model by optimising the variational objective function
         Input
@@ -94,11 +96,12 @@ class VariationalInversion():
         output_interval = math.ceil(n_iter / n_out)
         # if no optimizer is provided, default is Adam optimizer
         if optimizer is None:
-            optimizer = torch.optim.Adam(self.variational.parameters(), lr = lr)
+            optimizer = torch.optim.Adam(self.variationalModel.parameters(), lr = lr)
 
         start = time.time()
         for i in range(n_iter):
-            z, logq = self.variational(nsample)
+            x = self.variationalModel.sample_from_base(nsample)
+            z, logq = self.variationalModel(x)
             logp = self.log_posterior(z)
 
             negative_elbo = -torch.mean(logp - logq) # mean: Expectation term using Monte Carlo
@@ -108,34 +111,33 @@ class VariationalInversion():
             loss.append(negative_elbo.data.numpy())
 
             if i % output_interval == 0 and verbose:
-                # Save intermediate model parameters
-                param = get_flow_param(model.flows[-2])
-                name = os.path.join(args.basepath, args.outdir, f'{args.flow}_{args.kernel}_ite{i}_parameter.npy')
-                np.save(name, param)
-
-                name = os.path.join(args.basepath, args.outdir, f'{args.flow}_{args.kernel}_loss.txt')
-                np.savetxt(name, loss_his)
-
-                # # If you want to get posterior samples and save them, you can use the following:
-                # x = torch.as_tensor(gen_sample(2000, ndim, para1 = lower, para2 = upper, ini=args.ini_dist))
-                # z = model.sample(x)
-                # z = z.data.numpy()
-                # name = os.path.join(args.basepath, args.outdir, f'{args.flow}_{args.kernel}_ite{i}_sample.npy')
-                # np.save(name, z)
-
-                # save intermediate normalising flows model
-                if args.save_intermediate_result:
-                    name = os.path.join(args.basepath, args.outdir, f'{args.flow}_{args.kernel}_model.pt')
-                    torch.save({
-                                'iteration': i,
-                                'model_state_dict': model.state_dict(),
-                                'optimizer_state_dict': optimizer.state_dict(),
-                                'loss': loss_his,
-                                }, name)
-                    
-                print(f'Iteration: {i:>5d},\tLoss: {loss.data:>10.2f}')
+                print(f'Iteration: {i:>5d},\tLoss: {negative_elbo.data:>10.2f}')
                 end = time.time()
                 print(f'The elapsed time is: {end-start:.2f} s')
+
+                # Save intermediate model parameters
+                if save_intermediate_result:
+                    # param = get_flow_param(model.flows[-2])
+                    # name = os.path.join(args.basepath, args.outdir, f'{args.flow}_{args.kernel}_ite{i}_parameter.npy')
+                    # np.save(name, param)
+                    
+                    np.savetxt('loss.txt', loss)
+
+                    # # If you want to get posterior samples and save them, you can use the following:
+                    # x = torch.as_tensor(gen_sample(2000, ndim, para1 = lower, para2 = upper, ini=args.ini_dist))
+                    # z = model.sample(x)
+                    # z = z.data.numpy()
+                    # name = os.path.join(args.basepath, args.outdir, f'{args.flow}_{args.kernel}_ite{i}_sample.npy')
+                    # np.save(name, z)
+
+                    # save intermediate normalising flows model
+                    torch.save({
+                                'iteration': i,
+                                'model_state_dict': self.variationalModel.state_dict(),
+                                'optimizer_state_dict': optimizer.state_dict(),
+                                'loss': loss,
+                                }, 'model.pt')
+                
 
         print(f'Iteration: {n_iter:>5d},\tLoss: {negative_elbo.data:>10.2f}')
         end = time.time()
