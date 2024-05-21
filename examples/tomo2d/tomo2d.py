@@ -160,7 +160,7 @@ if __name__ == "__main__":
     # if the initial distribution of flow model is a Uniform distribution, 
     # then add a flow to transform from constrained to real space
     if args.ini_dist == 'Uniform':
-        flows.insert(0, Constr2Real(lower = lower, upper = upper))
+        flows.insert(0, Constr2Real(lower = 0, upper = 1))
     flows.append(Real2Constr(lower = lower, upper = upper))
 
     model = VariationalModel(flows)
