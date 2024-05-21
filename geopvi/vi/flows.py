@@ -234,6 +234,7 @@ class Planar(nn.Module):
     """
     def __init__(self, dim, nonlinearity=torch.tanh):
         super().__init__()
+        self.dim = dim
         self.h = nonlinearity
         self.w = nn.Parameter(torch.Tensor(dim))
         self.u = nn.Parameter(torch.Tensor(dim))
@@ -279,6 +280,7 @@ class Radial(nn.Module):
     """
     def __init__(self, dim):
         super().__init__()
+        self.dim = dim
         self.x0 = nn.Parameter(torch.Tensor(dim))
         self.log_alpha = nn.Parameter(torch.Tensor(1))
         self.beta = nn.Parameter(torch.Tensor(1))
