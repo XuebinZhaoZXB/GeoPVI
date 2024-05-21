@@ -11,9 +11,19 @@ class VariationalModel(nn.Module):
     inherited from torch.nn.Module
     This is used to build and sample from the variational pdf
     '''
-    def __init__(self, flows):
+    def __init__(self, flows, base_dist = 'Normal'):
+        '''
+        flows: a list that defines a flow model to construct a parmetric variational distribution
+        base_dist: base (initial) distribution. Currently support Standard Normal N(0,1) and Uniform U(0,1)
+        Future release might support other types of base distribution
+        '''
         super().__init__()
         self.flows = nn.ModuleList(flows)
+        self.base_dist = base_dist
+
+    # def _sample_base_pdf(self, nsamples, dim = 1):
+    #     if self.base_dist == 'Normal'
+    #         return torch.randn(nsamples, )
 
     def forward(self, x):
         m, _ = x.shape
@@ -53,19 +63,20 @@ class VariationalModel(nn.Module):
     #         loss_his.append(loss.data.numpy())
 
 
-class BayesianInversion():
+class VariationalInversion():
     '''
-    A class that defnies the objective function in variational inference, i.e., maximising ELBO or minimising KL
+    A class that performs variationa inversion by maximising ELBO 
+    or minimising KL divergence between variationa and posterior distributions
     '''
     def __init__(self, variational, log_posterior):
         '''
         variational: a class that defines the variational distribution (variational model)
-        log_post: a function that calculates posterior unnormalised probability value for any given model sample
+        log_post: a function that calculates unnormalised posterior probability value for any given model sample
         '''
         self.log_posterior = log_posterior
-        self.variational = variational
+        self.variational_dist = variational
 
-    def update(self, optimizer = None, lr = 0.001, n_iter = 1000, nsample = 4, start_ite = 0, n_out = 1, verbose = True):
+    def update(self, optimizer = None, lr = 0.001, n_iter = 1000, nsample = 4, n_out = 1, verbose = True):
         '''
         Update variational model by optimising the variational objective function
         Input
@@ -74,19 +85,19 @@ class BayesianInversion():
             n_iter: number of iterations
             nsample: number of samples per iteration to perform Monte Carlo integration
             n_out: number of outputing intermediate training results for quality control
-            verbose: whether print intermediate training or not
+            verbose: whether print intermediate training process or not
         Return
-            loss: mean loss value for each iterations, vector of length n
+            loss: average loss value for each iteration, vector of length n
         '''
 
         loss = []
         output_interval = math.ceil(n_iter / n_out)
-        
+        # if no optimizer is provided, default is Adam optimizer
+        if optimizer is None:
+            optimizer = torch.optim.Adam(self.variational.parameters(), lr = lr)
+
         start = time.time()
         for i in range(n_iter):
-            # model.train()
-            # x = torch.as_tensor(gen_sample(args.nsample, ndim, para1 = lower, para2 = upper, ini=args.ini_dist))
-
             z, logq = self.variational(nsample)
             logp = self.log_posterior(z)
 
