@@ -97,7 +97,9 @@ class VariationalInversion():
         # if no optimizer is provided, default is Adam optimizer
         if optimizer is None:
             optimizer = torch.optim.Adam(self.variationalModel.parameters(), lr = lr)
-
+        if verbose:
+            print('----------------------------------------\n')
+            
         start = time.time()
         for i in range(n_iter):
             x = self.variationalModel.sample_from_base(nsample)
@@ -138,10 +140,10 @@ class VariationalInversion():
                                 'loss': loss,
                                 }, 'model.pt')
                 
-
-        print(f'Iteration: {n_iter:>5d},\tLoss: {negative_elbo.data:>10.2f}')
-        end = time.time()
-        print(f'The elapsed time is: {end-start:.2f} s')
-        print('----------------------------------------\n')        
+        if verbose:
+            print(f'Iteration: {n_iter:>5d},\tLoss: {negative_elbo.data:>10.2f}')
+            end = time.time()
+            print(f'The elapsed time is: {end-start:.2f} s')
+            print('----------------------------------------\n')        
 
         return loss
