@@ -3,7 +3,7 @@ import torch
 from torch.multiprocessing import Pool
 from torch.autograd import Function
 
-from geopvi.tomo2d.fmm import fm2d
+from geopvi.forward.tomo2d.fmm import fm2d
 
 class ForwardModel(Function):
     @staticmethod

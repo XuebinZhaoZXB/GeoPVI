@@ -12,7 +12,7 @@ from datetime import datetime
 
 from geopvi.vi.models import VariationalDistribution, VariationalInversion
 from geopvi.vi.flows import *
-from geopvi.fwi2d.posterior import Posterior 
+from geopvi.forward.fwi2d.posterior import Posterior 
 from geopvi.prior import Uniform, Normal
 from geopvi.utils import smooth_matrix_2D as smooth_matrix
 

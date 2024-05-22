@@ -3,7 +3,7 @@ import torch
 from torch.autograd import Function
 from torch.multiprocessing import Pool
 
-from geopvi.fwi2d import aco2d
+from geopvi.forward.fwi2d import aco2d
 
 class ForwardModel(Function):
     @staticmethod

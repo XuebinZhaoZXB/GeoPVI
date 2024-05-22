@@ -14,8 +14,8 @@ import PyDDS.dds_io as io
 from geopvi.prior import Uniform, Normal
 from geopvi.vi.models import VariationalDistribution, VariationalInversion
 from geopvi.vi.flows import *
-from geopvi.fwi3d_bp.posterior import Posterior
-import geopvi.fwi3d_bp.dask_utils as du 
+from geopvi.forward.fwi3d_bp.posterior import Posterior
+import geopvi.forward.fwi3d_bp.dask_utils as du 
 from geopvi.utils import smooth_matrix_3D as smooth_matrix
 
 

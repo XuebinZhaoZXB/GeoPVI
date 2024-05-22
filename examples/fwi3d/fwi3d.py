@@ -10,12 +10,12 @@ import configparser
 import time
 from datetime import datetime
 
-from geopvi.fwi3d.posterior import Posterior
+from geopvi.forward.fwi3d.posterior import Posterior
 from geopvi.vi.models import VariationalDistribution, VariationalInversion
 from geopvi.vi.flows import *
 from geopvi.prior import Uniform, Normal
 from geopvi.utils import smooth_matrix_3D as smooth_matrix
-import geopvi.fwi3d.dask_utils as du 
+import geopvi.forward.fwi3d.dask_utils as du 
 
 
 def init_vfwi(args, config):

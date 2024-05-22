@@ -11,7 +11,7 @@ from datetime import datetime
 
 from geopvi.vi.models import VariationalDistribution, VariationalInversion
 from geopvi.vi.flows import *
-from geopvi.tomo2d.posterior import Posterior 
+from geopvi.forward.tomo2d.posterior import Posterior 
 from geopvi.prior import Uniform, Normal
 
 
