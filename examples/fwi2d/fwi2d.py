@@ -10,30 +10,12 @@ import configparser
 import time
 from datetime import datetime
 
-from geopvi.vi.models import VariationalModel
+from geopvi.vi.models import VariationalDistribution, VariationalInversion
 from geopvi.vi.flows import *
 from geopvi.fwi2d.posterior import Posterior 
 from geopvi.prior import Uniform, Normal
+from geopvi.utils import smooth_matrix_2D as smooth_matrix
 
-
-def delta(n):
-    diag0 = np.full((n,),fill_value=-2); diag0[0]=-1; diag0[-1]=-1
-    diag1 = np.full((n-1,),fill_value=1)
-    diagonals = [diag0,diag1,diag1]
-    D = sparse.diags(diagonals,[0,-1,1]).tocsc()
-    return D
-    
-def smooth_matrix(nx, nz, smoothx, smoothz):
-    smoothx = np.full((nz,),fill_value=smoothx)
-    smoothz = np.full((nz,),fill_value=smoothz)
-    deltax = delta(nx)
-    deltaz = delta(nz)/smoothz[:,None]
-    Ix = sparse.eye(nx)
-    Iz = sparse.eye(nz)
-    Sx = sparse.kron(Iz/smoothx,deltax)
-    Sz = sparse.kron(deltaz,Ix)
-    L = sparse.vstack([Sx,Sz])
-    return L
 
 def get_offdiag_mask(correlation, ndim, nx = 1, nz = 1):
     z, x = correlation.shape
@@ -53,16 +35,6 @@ def get_offdiag_mask(correlation, ndim, nx = 1, nz = 1):
             i += 1
     return mask
 
-def gen_sample(n = 512, dim = 1, para1 = 0., para2 = 1., ini = 'Normal'):
-    """
-    The initial distribution: q_0(z_0)
-    (Often a known simple distribution, e.g., a Uniform or Standard Gaussian)
-    """
-    if ini == 'Normal':
-        return np.random.normal(0., 1., size = (n, dim))
-    if ini == 'Uniform':
-        eps = np.finfo(np.float32).eps
-        return np.random.uniform(para1 + eps, para2 - eps, size = (n, dim))
 
 def get_flow_param(flow):
     mus = flow.u.detach().numpy()
@@ -84,14 +56,14 @@ if __name__ == "__main__":
     argparser.add_argument("--kernel", default='structured', type=str)
     argparser.add_argument("--kernel_size", default=5, type=int)
     argparser.add_argument("--nflow", default=1, type=int)
-    argparser.add_argument("--nsample", default=8, type=int)
-    argparser.add_argument("--prcs", default=8, type=int)
-    argparser.add_argument("--iterations", default=10000, type=int)
+    argparser.add_argument("--nsample", default=2, type=int)
+    argparser.add_argument("--prcs", default=2, type=int)
+    argparser.add_argument("--iterations", default=5000, type=int)
     argparser.add_argument("--lr", default=0.001, type=float)
     argparser.add_argument("--ini_dist", default='Normal', type=str)
     argparser.add_argument("--sigma", default=0.1, type=float)
 
-    argparser.add_argument("--smooth", default=False, type=bool)
+    argparser.add_argument("--smooth", default=True, type=bool)
     argparser.add_argument("--smoothx", default=500, type=float)
     argparser.add_argument("--smoothz", default=500, type=float)
 
@@ -101,14 +73,14 @@ if __name__ == "__main__":
     argparser.add_argument("--datafile", metavar='data_obs', default='waveform.npy', type=str)
     argparser.add_argument("--flow_init_name", type=str, default='none', 
                                 help='Parameter filename for flow initial value')
-    argparser.add_argument("--outdir", type=str, default='output/psvi/', 
+    argparser.add_argument("--outdir", type=str, default='output/test/', 
                                 help='Folder for inversion results')
 
     argparser.add_argument("--verbose", default=True, type=bool, help='Output intermediate results')
     argparser.add_argument("--save_intermediate_result", default=True, type=bool,
                                 help='Whether save intermediate training model, for resume from previous training')
     argparser.add_argument("--resume", default=False, type=bool, help='Resume previous training')
-    argparser.add_argument("--output_interval", default=2000, type=int, help='frequency for output model parameters')
+    argparser.add_argument("--nout", default=5, type=int, help='Number to print/output intermediate inversion results')
 
 
     args = argparser.parse_args()
@@ -202,19 +174,19 @@ if __name__ == "__main__":
     # if the initial distribution of flow model is a Uniform distribution, 
     # then add a flow to transform from constrained to real space
     if args.ini_dist == 'Uniform':
-        flows.insert(0, Constr2Real(lower = lower, upper = upper))
+        flows.insert(0, Constr2Real(lower = 0, upper = 1))
     flows.append(Real2Constr(lower = lower, upper = upper))
+    variational = VariationalDistribution(flows, base = args.ini_dist)
 
-    model = VariationalModel(flows)
+    # define VI class to perform inversion
+    inversion = VariationalInversion(variationalDistribution = variational, log_posterior = posterior.log_prob)
 
-    optimizer = optim.Adam(model.parameters(), lr = args.lr)
+    optimizer = optim.Adam(variational.parameters(), lr = args.lr)
+    print(f"Number of hyperparameters is: {sum(p.numel() for p in variational.parameters())}", )
+    print(f'Optimising variational model for {args.iterations} iterations with {args.nsample} samples per iteration\n')
+
+
     loss_his = []
-
-    print(f"Number of flow parameters is: {sum(p.numel() for p in model.parameters())}", )
-    print(f'Optimising ADVI for {args.iterations} iterations with {args.nsample} samples per iteration\n')
-
-    start = time.time()
-
     start_ite = 0
     # if start_ite != 0, we load the previously saved model checkpoint and resume training
     if args.resume:
@@ -224,64 +196,20 @@ if __name__ == "__main__":
         except:
             print('Invalid name for model checkpoint!')
         start_ite = checkpoint['iteration']
-        model.load_state_dict(checkpoint['model_state_dict'])
+        variational.load_state_dict(checkpoint['model_state_dict'])
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         loss_his = checkpoint['loss']
         print(f'Resume training from previous run at iteration {start_ite:4d}\n')
     else:
         print(f'Start training at iteration {start_ite}\n')
-    print('----------------------------------------')
 
-    for i in range(start_ite, args.iterations):
-        optimizer.zero_grad()
-        # model.train()
-        x = torch.as_tensor(gen_sample(args.nsample, ndim, para1 = lower, para2 = upper, ini=args.ini_dist))
-        z, log_det = model(x)
-        logp = posterior.log_prob(z)
+    # Perform variational inversion
+    loss_his.append(
+                        inversion.update(optimizer = optimizer, n_iter = args.iterations, nsample = args.nsample, n_out = args.nout, 
+                                    verbose = args.verbose, save_intermediate_result = args.save_intermediate_result)
+                    )
 
-        loss = -torch.mean(logp + log_det) # mean: Expectation term using Monte Carlo
-        loss.backward()
-        optimizer.step()
-        loss_his.append(loss.data.numpy())
-
-        if i % args.output_interval == 0 and args.verbose:
-            # Save intermediate model parameters
-            param = get_flow_param(model.flows[-2])
-            name = os.path.join(args.basepath, args.outdir, f'{args.flow}_{args.kernel}_ite{i}_parameter.npy')
-            np.save(name, param)
-
-            name = os.path.join(args.basepath, args.outdir, f'{args.flow}_{args.kernel}_loss.txt')
-            np.savetxt(name, loss_his)
-
-            # # If you want to get posterior samples and save them, you can use the following:
-            # x = torch.as_tensor(gen_sample(2000, ndim, para1 = lower, para2 = upper, ini=args.ini_dist))
-            # z = model.sample(x)
-            # z = z.data.numpy()
-            # name = os.path.join(args.basepath, args.outdir, f'{args.flow}_{args.kernel}_ite{i}_sample.npy')
-            # np.save(name, z)
-
-            # save intermediate normalising flows model
-            if args.save_intermediate_result:
-                name = os.path.join(args.basepath, args.outdir, f'{args.flow}_{args.kernel}_model.pt')
-                torch.save({
-                            'iteration': i,
-                            'model_state_dict': model.state_dict(),
-                            'optimizer_state_dict': optimizer.state_dict(),
-                            'loss': loss_his,
-                            }, name)
-                
-            print(f'Iteration: {i:>5d},\tLoss: {loss.data:>10.2f}')
-            end = time.time()
-            print(f'The elapsed time is: {end-start:.2f} s')
-
-    print(f'Iteration: {args.iterations:>5d},\tLoss: {loss.data:>10.2f}')
-    end = time.time()
-    print(f'The elapsed time is: {end-start:.2f} s')
-    print('----------------------------------------\n')
-    
-    print('Finish training!')
-
-    param = get_flow_param(model.flows[-2])
+    param = get_flow_param(variational.flows[-2])
     name = os.path.join(args.basepath, args.outdir, f'{args.flow}_{args.kernel}_parameter.npy')
     np.save(name, param)
 
@@ -290,15 +218,8 @@ if __name__ == "__main__":
 
     name = os.path.join(args.basepath, args.outdir, f'{args.flow}_{args.kernel}_model.pt')
     torch.save({
-                'iteration': i,
-                'model_state_dict': model.state_dict(),
+                'iteration': (len(loss_his)),
+                'model_state_dict': variational.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'loss': loss_his,
                 }, name)
-
-    # # save posterior samples from trained model
-    # x = torch.as_tensor(gen_sample(2000, ndim, para1 = lower, para2 = upper, ini=args.ini_dist))
-    # z = model.sample(x)
-    # z = z.data.numpy()
-    # name = os.path.join(args.basepath, args.outdir, f'{args.flow}_{args.kernel}_sample.npy')
-    # np.save(name, z)

@@ -168,8 +168,8 @@ if __name__ == "__main__":
 
     # Perform variational inversion
     loss_his.append(
-                        inversion.update(optimizer = optimizer, lr = args.lr, n_iter = args.iterations, 
-                                        nsample = args.nsample, n_out = args.nout)
+                        inversion.update(optimizer = optimizer, n_iter = args.iterations, 
+                                        nsample = args.nsample, n_out = args.nout, verbose = True)
                     )
 
     param = get_flow_param(variational.flows[-2])
