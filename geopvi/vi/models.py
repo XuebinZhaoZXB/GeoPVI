@@ -134,7 +134,7 @@ class VariationalInversion():
 
                     # save intermediate normalising flows model
                     torch.save({
-                                'iteration': i,
+                                'iteration': len(loss),
                                 'model_state_dict': self.variationalDistribution.state_dict(),
                                 'optimizer_state_dict': optimizer.state_dict(),
                                 'loss': loss,
@@ -144,6 +144,7 @@ class VariationalInversion():
             print(f'Iteration: {n_iter:>5d},\tLoss: {negative_elbo.data:>10.2f}')
             end = time.time()
             print(f'The elapsed time is: {end-start:.2f} s')
-            print('----------------------------------------\n')        
+            print('----------------------------------------\n')   
+            print('Finish training!')
 
         return loss
