@@ -5,9 +5,9 @@ import torch
 import torch.nn as nn
 
 
-class VariationalModel(nn.Module):
+class VariationalDistribution(nn.Module):
     '''
-    A class that creates a variational model that uses a set of invertible transforms (normalising flows)
+    A class that creates a variational model (distribution) which uses a set of invertible transforms (normalising flows)
     inherited from torch.nn.Module
     This is used to build and sample from the variational pdf
     '''
@@ -69,13 +69,13 @@ class VariationalInversion():
     A class that performs variational inversion by maximising ELBO 
     or minimising KL divergence between variationa and posterior distributions
     '''
-    def __init__(self, variationalModel, log_posterior):
+    def __init__(self, variationalDistribution, log_posterior):
         '''
-        variationalModel: a class that defines the variational distribution (variational model)
+        variationalDistribution: a class that defines the variational distribution (variational model)
         log_post: a function that calculates unnormalised posterior probability value for any given model sample
         '''
         self.log_posterior = log_posterior
-        self.variationalModel = variationalModel
+        self.variationalDistribution = variationalDistribution
 
     def update(self, optimizer = None, lr = 0.001, n_iter = 1000, nsample = 10, n_out = 1, 
                     verbose = True, save_intermediate_result = False):
@@ -96,14 +96,14 @@ class VariationalInversion():
         output_interval = math.ceil(n_iter / n_out)
         # if no optimizer is provided, default is Adam optimizer
         if optimizer is None:
-            optimizer = torch.optim.Adam(self.variationalModel.parameters(), lr = lr)
+            optimizer = torch.optim.Adam(self.variationalDistribution.parameters(), lr = lr)
         if verbose:
             print('----------------------------------------\n')
 
         start = time.time()
         for i in range(n_iter):
-            x = self.variationalModel.sample_from_base(nsample)
-            z, logq = self.variationalModel(x)
+            x = self.variationalDistribution.sample_from_base(nsample)
+            z, logq = self.variationalDistribution(x)
             logp = self.log_posterior(z)
 
             negative_elbo = -torch.mean(logp - logq) # mean: Expectation term using Monte Carlo
@@ -135,7 +135,7 @@ class VariationalInversion():
                     # save intermediate normalising flows model
                     torch.save({
                                 'iteration': i,
-                                'model_state_dict': self.variationalModel.state_dict(),
+                                'model_state_dict': self.variationalDistribution.state_dict(),
                                 'optimizer_state_dict': optimizer.state_dict(),
                                 'loss': loss,
                                 }, 'model.pt')
