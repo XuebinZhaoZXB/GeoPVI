@@ -2,7 +2,7 @@
 GeoPVI (Geophysical Inversion using Parametric Variational Inference)
 #####################################################################
 
-This package solves fully nonlinear geophysical inverse problems using parametric variational inference, specifically including normalising flows, boosting variational inference, and physically structured variational inference.
+This package solves fully nonlinear (Bayesian) geophysical inverse problems using parametric variational inference, specifically including normalising flows, boosting variational inference, and physically structured variational inference.
 
 
 Author
@@ -59,6 +59,7 @@ To perform 3D FWI using BP's server and the ``tdwi`` solver, please use codes in
 
 Examples
 ---------
+- For a complete 2D travel time tomography example, please see the example in ``examples/tomo2d``. 
 - For a complete 2D full waveform inversion example, please see the example in ``examples/fwi2d``. 
 - For a complete 3D full waveform inversion example using the **BP** ``tdwi`` forward modeller, please see the example in ``examples/fwi3d_bp``.
 - For an example implementation of 3D full waveform inversion, please see the example in ``examples/fwi3d``. Note
