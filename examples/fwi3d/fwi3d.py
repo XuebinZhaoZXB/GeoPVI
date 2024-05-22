@@ -216,3 +216,4 @@ if __name__ == "__main__":
                 'loss': loss_his,
                 }, name)
 
+    du.dask_del(cluster, client, odask=daskpath)
