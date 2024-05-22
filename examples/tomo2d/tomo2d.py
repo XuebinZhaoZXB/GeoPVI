@@ -45,7 +45,7 @@ if __name__ == "__main__":
     argparser.add_argument("--prior_param", default='prior.txt', type=str)
     argparser.add_argument("--fmm_config", metavar='fmm_config', default='config.ini', type=str)
     argparser.add_argument("--datafile", metavar='data_obs', default='traveltime.txt', type=str)
-    argparser.add_argument("--outdir", type=str, default='output/test/', help='Folder for inversion results')
+    argparser.add_argument("--outdir", type=str, default='output/', help='Folder for inversion results')
 
     argparser.add_argument("--verbose", default=True, type=bool, help='Output intermediate results')
     argparser.add_argument("--save_intermediate_result", default=False, type=bool,
