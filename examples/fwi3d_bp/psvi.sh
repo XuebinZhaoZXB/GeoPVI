@@ -18,7 +18,7 @@ module load sge
 module load intel
 # module load pyhpc
 module load conda
-conda activate intel-2019
+conda activate intel-2020
 
 export OMP_NUM_THREADS=36
 
