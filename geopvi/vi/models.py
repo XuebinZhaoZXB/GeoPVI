@@ -31,13 +31,13 @@ class VariationalDistribution(nn.Module):
     def _log_prob_base(self, x):
         if self.base == 'Normal':
             return -0.5 * self.dim * np.log(2*np.pi) - 0.5 * (x**2).sum(axis = 1)
-        elif self.base = 'Uniform':
+        elif self.base == 'Uniform':
             return torch.zeros(x.shape[0])
 
     def sample_from_base(self, nsamples):
         if self.base == 'Normal':
             return torch.randn(nsamples, self.dim)
-        elif self.base = 'Uniform':
+        elif self.base == 'Uniform':
             return torch.rand(nsamples, self.dim)
 
     def forward(self, x):
