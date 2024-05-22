@@ -11,16 +11,16 @@ class VariationalDistribution(nn.Module):
     inherited from torch.nn.Module
     This is used to build and sample from the variational pdf
     '''
-    def __init__(self, flows, base_dist = 'Normal'):
+    def __init__(self, flows, base = 'Normal'):
         '''
         flows: a list that defines a flow model to construct a parmetric variational distribution
-        base_dist: base (initial) distribution. Currently support Standard Normal N(0,1) and Uniform U(0,1)
+        base: base (initial) distribution. Currently support Standard Normal N(0,1) and Uniform U(0,1)
         Future release might support other types of base distribution
         '''
         super().__init__()
         self.flows = nn.ModuleList(flows)
-        if base_dist == 'Uniform' or base_dist == 'Normal':
-            self.base_dist = base_dist
+        if base == 'Uniform' or base == 'Normal':
+            self.base = base
         else:
             raise NotImplementedError("Base distribution provided not currently supported")
         for flow in flows:
@@ -29,15 +29,15 @@ class VariationalDistribution(nn.Module):
                 break
     
     def _log_prob_base(self, x):
-        if self.base_dist == 'Normal':
+        if self.base == 'Normal':
             return -0.5 * self.dim * np.log(2*np.pi) - 0.5 * (x**2).sum(axis = 1)
-        elif self.base_dist = 'Uniform':
+        elif self.base = 'Uniform':
             return torch.zeros(x.shape[0])
 
     def sample_from_base(self, nsamples):
-        if self.base_dist == 'Normal':
+        if self.base == 'Normal':
             return torch.randn(nsamples, self.dim)
-        elif self.base_dist = 'Uniform':
+        elif self.base = 'Uniform':
             return torch.rand(nsamples, self.dim)
 
     def forward(self, x):
