@@ -63,7 +63,7 @@ if __name__ == "__main__":
     argparser.add_argument("--ini_dist", default='Normal', type=str)
     argparser.add_argument("--sigma", default=0.1, type=float)
 
-    argparser.add_argument("--smooth", default=True, type=bool)
+    argparser.add_argument("--smooth", default=False, type=bool)
     argparser.add_argument("--smoothx", default=500, type=float)
     argparser.add_argument("--smoothz", default=500, type=float)
 
@@ -73,7 +73,7 @@ if __name__ == "__main__":
     argparser.add_argument("--datafile", metavar='data_obs', default='waveform.npy', type=str)
     argparser.add_argument("--flow_init_name", type=str, default='none', 
                                 help='Parameter filename for flow initial value')
-    argparser.add_argument("--outdir", type=str, default='output/test/', 
+    argparser.add_argument("--outdir", type=str, default='output/', 
                                 help='Folder for inversion results')
 
     argparser.add_argument("--verbose", default=True, type=bool, help='Output intermediate results')

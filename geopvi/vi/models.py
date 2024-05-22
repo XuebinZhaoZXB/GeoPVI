@@ -123,7 +123,7 @@ class VariationalInversion():
                     # name = os.path.join(args.basepath, args.outdir, f'{args.flow}_{args.kernel}_ite{i}_parameter.npy')
                     # np.save(name, param)
                     
-                    np.savetxt('loss.txt', loss)
+                    np.savetxt('loss_intermediate.txt', loss)
 
                     # # If you want to get posterior samples and save them, you can use the following:
                     # x = torch.as_tensor(gen_sample(2000, ndim, para1 = lower, para2 = upper, ini=args.ini_dist))
@@ -138,7 +138,7 @@ class VariationalInversion():
                                 'model_state_dict': self.variationalDistribution.state_dict(),
                                 'optimizer_state_dict': optimizer.state_dict(),
                                 'loss': loss,
-                                }, 'model.pt')
+                                }, 'model_intermediate.pt')
                 
         if verbose:
             print(f'Iteration: {n_iter:>5d},\tLoss: {negative_elbo.data:>10.2f}')
