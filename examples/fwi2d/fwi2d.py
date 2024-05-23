@@ -204,7 +204,7 @@ if __name__ == "__main__":
         print(f'Start training at iteration {start_ite}\n')
 
     # Perform variational inversion
-    loss_his.append(
+    loss_his.extend(
                     inversion.update(optimizer = optimizer, n_iter = args.iterations, nsample = args.nsample, n_out = args.nout, 
                                 verbose = args.verbose, save_intermediate_result = args.save_intermediate_result)
                     )
