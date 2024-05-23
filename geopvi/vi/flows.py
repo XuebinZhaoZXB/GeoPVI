@@ -7,7 +7,13 @@ import torch.nn.functional as F
 from torch.autograd import Function
 import scipy.sparse as sparse
 import scipy.sparse.linalg as linalg
+from vi.utils import *
 
+"""
+The field of normalising flows is developing very fast, in this package we 
+just implemented several flows that are tested to be effective as of 2021.
+Feel free to add more flows!
+"""
 
 # supported non-linearities: note that the function must be invertible
 functional_derivatives = {
@@ -309,3 +315,529 @@ class Radial(nn.Module):
 
     def inverse(self, z):
         raise NotImplementedError("Radial flow has no algebraic inverse.")
+
+
+class RealNVP(nn.Module):
+    """
+    RealNVP: real-valued non-volume preserving flow
+    Calling one RealNVP layer is actually applying two coupling layers
+
+    [Dinh et. al. 2017 - ICLR]
+    """
+    def __init__(self, dim, hidden_dim = [100], base_network = FCNN):
+        super().__init__()
+        self.dim = dim
+        self.t0 = base_network(dim - dim // 2, dim // 2, hidden_dim)
+        self.s0 = base_network(dim - dim // 2, dim // 2, hidden_dim)
+        self.t1 = base_network(dim // 2, dim - dim // 2, hidden_dim)
+        self.s1 = base_network(dim // 2, dim - dim // 2, hidden_dim)
+
+    def forward(self, x, train = True):
+        # z = torch.zeros_like(x)
+        # x0, x1 = x[:,::2], x[:,1::2]
+        x0, x1 = x.chunk(2, dim = 1)
+        t0_transformed = self.t0(x0)
+        s0_transformed = torch.tanh(self.s0(x0))
+        x1 = t0_transformed + x1 * torch.exp(s0_transformed)
+        t1_transformed = self.t1(x1)
+        s1_transformed = torch.tanh(self.s1(x1))
+        x0 = t1_transformed + x0 * torch.exp(s1_transformed)
+        log_det = torch.sum(s0_transformed, dim=1) + \
+                  torch.sum(s1_transformed, dim=1)
+
+        return torch.cat([x0, x1], dim = 1), log_det
+
+    def inverse(self, z):
+        # x = torch.zeros_like(z)
+        # z0, z1 = z[:,::2], z[:,1::2]
+        z0, z1 = z.chunk(2, dim = 1)
+        t1_transformed = self.t1(z1)
+        s1_transformed = torch.tanh(self.s1(z1))
+        z0 = (z0 - t1_transformed) * torch.exp(-s1_transformed)
+        t0_transformed = self.t0(z0)
+        s0_transformed = torch.tanh(self.s0(z0))
+        z1 = (z1 - t0_transformed) * torch.exp(-s0_transformed)
+        log_det = torch.sum(-s0_transformed, dim=1) + \
+                  torch.sum(-s1_transformed, dim=1)
+        
+        return torch.cat([z0, z1], dim = 1), log_det
+
+
+
+class SIAF(nn.Module):
+    """
+    Inverse auto-regressive flow using slow version with explicit networks per dim
+
+    [Kingma et al. 2016]
+    """
+    def __init__(self, dim, hidden_dim = [8], base_network=FCNN):
+        super().__init__()
+        self.dim = dim
+        self.layers = nn.ModuleList()
+        self.initial_param = nn.Parameter(torch.Tensor(2))
+        for i in range(1, dim):
+            self.layers += [base_network(i, 2, hidden_dim)]
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        init.uniform_(self.initial_param, -math.sqrt(0.5), math.sqrt(0.5))
+
+    def forward(self, x, train = True):
+        z = torch.zeros_like(x)
+        log_det = torch.zeros(z.shape[0])
+        for i in range(self.dim):
+            if i == 0:
+                mu, alpha = self.initial_param[0], self.initial_param[1]
+            else:
+                out = self.layers[i - 1](x[:, :i])
+                mu, alpha = out[:, 0], out[:, 1]
+            # z[:, i] = (x[:, i] - mu) / torch.exp(alpha)
+            z[:, i] = x[:, i] * torch.exp(alpha) + mu
+            log_det += alpha
+        z = z.flip(dims=(1,))
+        return z, log_det
+
+    def inverse(self, z):
+        x = torch.zeros_like(z)
+        log_det = torch.zeros(z.shape[0])
+        z = z.flip(dims=(1,))
+        for i in range(self.dim):
+            if i == 0:
+                mu, alpha = self.initial_param[0], self.initial_param[1]
+            else:
+                out = self.layers[i - 1](x[:, :i])
+                mu, alpha = out[:, 0], out[:, 1]
+            # x[:, i] = mu + torch.exp(alpha) * z[:, i]
+            x[:, i] = (z[:, i] - mu) * torch.exp(-alpha)
+            log_det -= alpha
+        return x, log_det
+
+
+class IAF(nn.Module):
+    """
+    Inverse auto-regressive flow using Masked matrix for fast forward
+
+    [Kingma et al. 2016]
+    """
+    
+    def __init__(self, dim, hidden_dim = [100], base_network=MaskedNN, \
+                    renew_mask_every = 20, nmasks = 10):
+        super().__init__()
+        self.dim = dim
+        self.nmasks = nmasks
+        self.renew_mask_every = renew_mask_every
+        self.net = base_network(dim, dim*2, hidden_dim, \
+                    num_masks = self.nmasks, natural_ordering = True)
+        self.seed = 0
+
+    def forward(self, x, train = True):
+        # here we see that we are evaluating all of z in parallel, so density estimation will be fast
+        out = torch.zeros((x.shape[0], 2 * self.dim))
+        nsamples = 1 if train else self.nmasks
+
+        # fetch the next seed to decide update mask or not during training
+        self.seed = (self.seed + 1) % self.renew_mask_every
+
+        for s in range(nsamples):
+            # perform order/connectivity-agnostic training by resampling the masks
+            if self.seed == 0 or (not train): # if in test, cycle masks every time
+                self.net.net.update_masks()
+            # forward the model
+            out += self.net(x)
+        out /= nsamples
+
+        # out = self.net(x)
+        mu, alpha = out.split(self.dim, dim=1)
+        z = x * torch.exp(alpha) + mu
+        # reverse order, so if we stack MAFs correct things happen
+        z = z.flip(dims=(1,))
+        log_det = torch.sum(alpha, dim=1)
+        return z, log_det
+    
+    def inverse(self, z, train = False):
+        # we have to decode the x one at a time, sequentially
+        x = torch.zeros_like(z)
+        log_det = torch.zeros(z.shape[0])
+        z = z.flip(dims=(1,)) 
+        for i in range(self.dim):
+            out = self.net(x.clone()) # clone to avoid in-place op errors if using IAF
+            mu, alpha = out.split(self.dim, dim=1)
+            x[:, i] = (z[:, i] - mu[:, i]) * torch.exp(-alpha[:, i])
+            log_det -= alpha[:, i]
+        return x, log_det
+
+
+class ActNorm(nn.Module):
+    """
+    ActNorm layer.
+
+    [Kingma and Dhariwal, 2018.]
+    """
+    def __init__(self, dim):
+        super().__init__()
+        self.dim = dim
+        self.mu = nn.Parameter(torch.zeros(dim, dtype = torch.float))
+        self.log_sigma = nn.Parameter(torch.zeros(dim, dtype = torch.float))
+
+    def forward(self, x, train = True):
+        z = x * torch.exp(self.log_sigma) + self.mu
+        log_det = torch.sum(self.log_sigma)
+        return z, log_det
+
+    def inverse(self, z):
+        x = (z - self.mu) / torch.exp(self.log_sigma)
+        log_det = -torch.sum(self.log_sigma)
+        return x, log_det
+
+
+class OneByOneConv(nn.Module):
+    """
+    Invertible 1x1 convolution.
+
+    [Kingma and Dhariwal, 2018.]
+    """
+    def __init__(self, dim):
+        super().__init__()
+        self.dim = dim
+        W, _ = sp.linalg.qr(np.random.randn(dim, dim))
+        P, L, U = sp.linalg.lu(W)
+        self.P = torch.tensor(P, dtype = torch.float)
+        self.L = nn.Parameter(torch.tensor(L, dtype = torch.float))
+        self.S = nn.Parameter(torch.tensor(np.diag(U), dtype = torch.float))
+        self.U = nn.Parameter(torch.triu(torch.tensor(U, dtype = torch.float),
+                              diagonal = 1))
+        self.W_inv = None
+
+    def forward(self, x, train = True):
+        L = torch.tril(self.L, diagonal = -1) + torch.diag(torch.ones(self.dim))
+        U = torch.triu(self.U, diagonal = 1)
+        z = x @ self.P @ L @ (U + torch.diag(self.S))
+        log_det = torch.sum(torch.log(torch.abs(self.S)))
+        return z, log_det
+
+    def inverse(self, z):
+        if not self.W_inv:
+            L = torch.tril(self.L, diagonal = -1) + \
+                torch.diag(torch.ones(self.dim))
+            U = torch.triu(self.U, diagonal = 1)
+            W = self.P @ L @ (U + torch.diag(self.S))
+            self.W_inv = torch.inverse(W)
+        x = z @ self.W_inv
+        log_det = -torch.sum(torch.log(torch.abs(self.S)))
+        return x, log_det
+
+
+class Invertible1x1Conv(nn.Module):
+    """ 
+    As introduced in Glow paper.
+    """
+    
+    def __init__(self, dim):
+        super().__init__()
+        self.dim = dim
+        Q = torch.nn.init.orthogonal_(torch.randn(dim, dim))
+        P, L, U = torch.lu_unpack(*Q.lu())
+        self.P = P # remains fixed during optimization
+        self.L = nn.Parameter(L) # lower triangular portion
+        self.S = nn.Parameter(U.diag()) # "crop out" the diagonal to its own parameter
+        self.U = nn.Parameter(torch.triu(U, diagonal=1)) # "crop out" diagonal, stored in S
+
+    def _assemble_W(self):
+        """ assemble W from its pieces (P, L, U, S) """
+        L = torch.tril(self.L, diagonal=-1) + torch.diag(torch.ones(self.dim))
+        U = torch.triu(self.U, diagonal=1)
+        W = self.P @ L @ (U + torch.diag(self.S))
+        return W
+
+    def forward(self, x, train = True):
+        W = self._assemble_W()
+        z = x @ W
+        log_det = torch.sum(torch.log(torch.abs(self.S)))
+        return z, log_det
+
+    def inverse(self, z):
+        W = self._assemble_W()
+        W_inv = torch.inverse(W)
+        x = z @ W_inv
+        log_det = -torch.sum(torch.log(torch.abs(self.S)))
+        return x, log_det
+
+
+class Reverse_order(nn.Module):
+    """
+    Reverse the order of the input vector
+    """
+    def __init__(self, dim):
+        super().__init__()
+        self.index = np.linspace(dim - 1,0, dim)
+
+    def forward(self, x, train = True):
+        z = x[:, self.index]
+        log_det = torch.zeros(x.shape[0])
+        return z, log_det
+
+    def inverse(self, z):
+        x = z[:, np.argsort(self.index)]
+        log_det = torch.zeros(x.shape[0])
+        return x, log_det
+
+
+class Permute(nn.Module):
+    """
+    Random permute (or re-order) model parameters
+    """
+    def __init__(self, dim, seed = 1, nx = 1, ny = 1, block_x = 1, block_y = 1, last_flow = False):
+        super().__init__()
+        subdomain = block_x * block_y
+        self.seed = seed
+        self.last_flow = last_flow
+        rng = np.random.RandomState(seed)
+
+        x_dim = np.linspace(0, nx, block_x+1, dtype = 'int32')[1:]
+        x_dim[1:] -= x_dim[:-1].copy()
+        y_dim = np.linspace(0, ny, block_y+1, dtype = 'int32')[1:]
+        y_dim[1:] -= y_dim[:-1].copy()
+        sub_dim = (x_dim.reshape(-1, 1) * y_dim).reshape(-1)
+        cum_dim = np.insert(np.cumsum(sub_dim), 0, 0)
+
+        if self.last_flow is False:
+            self.index = np.zeros(dim, dtype = 'int32')
+            for i in range(subdomain):
+                self.index[cum_dim[i]:cum_dim[i+1]] = rng.permutation(sub_dim[i]) + cum_dim[i]
+        else:
+            self.index = np.concatenate(
+                [np.concatenate(
+                    [np.arange(cum_dim[i*block_y + j], cum_dim[i*block_y + j + 1]).reshape(x_dim[i], y_dim[j])
+                    for j in range(block_y)], axis = 1) for i in range(block_x)], axis = 0).reshape(-1)
+    
+    def forward(self, x, train = True):
+        z = x[:, self.index]
+        log_det = torch.zeros(x.shape[0])
+        return z, log_det
+
+    def inverse(self, z):
+        x = z[:, np.argsort(self.index)]
+        log_det = torch.zeros(x.shape[0])
+        return x, log_det
+
+
+class NSF_SAR(nn.Module):
+    """
+    Neural spline flow, auto-regressive, slow version with explicit networks per dim
+
+    [Durkan et al. 2019]
+    """
+    def __init__(self, dim, K = 8, B = 3, hidden_dim = 50, base_network = FCNN):
+        super().__init__()
+        self.dim = dim
+        self.K = K
+        self.B = B
+        self.layers = nn.ModuleList()
+        self.init_param = nn.Parameter(torch.Tensor(3 * K - 1))
+        for i in range(1, dim):
+            self.layers += [base_network(i, 3 * K - 1, hidden_dim)]
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        init.uniform_(self.init_param, - 1 / 2, 1 / 2)
+
+    def forward(self, x, train = True):
+        z = torch.zeros_like(x)
+        log_det = torch.zeros(z.shape[0])
+        for i in range(self.dim):
+            if i == 0:
+                init_param = self.init_param.expand(x.shape[0], 3 * self.K - 1)
+                W, H, D = torch.split(init_param, self.K, dim = 1)
+            else:
+                out = self.layers[i - 1](x[:, :i])
+                W, H, D = torch.split(out, self.K, dim = 1)
+            W, H = torch.softmax(W, dim = 1), torch.softmax(H, dim = 1)
+            W, H = 2 * self.B * W, 2 * self.B * H
+            D = F.softplus(D)
+            z[:, i], ld = unconstrained_RQS(
+                x[:, i], W, H, D, inverse=False, tail_bound=self.B)
+            log_det += ld
+        z = z.flip(dims = (1,))
+        return z, log_det
+
+    def inverse(self, z):
+        x = torch.zeros_like(z)
+        log_det = torch.zeros(x.shape[0])
+        z = z.flip(dims=(1,))
+        for i in range(self.dim):
+            if i == 0:
+                init_param = self.init_param.expand(x.shape[0], 3 * self.K - 1)
+                W, H, D = torch.split(init_param, self.K, dim = 1)
+            else:
+                out = self.layers[i - 1](x[:, :i])
+                W, H, D = torch.split(out, self.K, dim = 1)
+            W, H = torch.softmax(W, dim = 1), torch.softmax(H, dim = 1)
+            W, H = 2 * self.B * W, 2 * self.B * H
+            D = F.softplus(D)
+            x[:, i], ld = unconstrained_RQS(
+                z[:, i], W, H, D, inverse = True, tail_bound = self.B)
+            log_det += ld
+        return x, log_det
+
+
+class NSF_AR(nn.Module):
+    """
+    Neural spline flow, auto-regressive, masked for fast forward
+
+    [Durkan et al. 2019]
+    """
+    def __init__(self, dim, K = 8, B = 3, hidden_dim = 100, base_network = MaskedNN, 
+                    renew_mask_every = 100, nmasks = 1):
+        super().__init__()
+        self.dim = dim
+        self.K = K
+        self.B = B
+        self.nmasks = nmasks
+        self.renew_mask_every = renew_mask_every
+        self.net = base_network(dim, dim * (3 * self.K - 1), hidden_dim, 
+                    num_masks = self.nmasks, natural_ordering = False)
+        self.seed = 0
+
+    def forward(self, x, train = True):
+        # here we see that we are evaluating all of z in parallel, so density estimation will be fast
+        log_det = torch.zeros(x.shape[0])
+        z = torch.zeros_like(x)
+        out = torch.zeros((x.shape[0], (3 * self.K - 1) * self.dim))
+        nsamples = 1 if train else self.nmasks
+
+        # fetch the next seed to decide update mask or not during training
+        self.seed = (self.seed + 1) % self.renew_mask_every
+        # print(self.seed)
+
+        for s in range(nsamples):
+            # perform order/connectivity-agnostic training by resampling the masks
+            if self.seed == 0 or (not train): # if in test, cycle masks every time
+                self.net.net.update_masks()
+            # forward the model
+            out += self.net(x)
+        out /= nsamples
+
+        out = out.reshape(-1, self.dim, 3 * self.K - 1)
+        W, H, D = torch.split(out, self.K, dim = 2)
+        W, H = torch.softmax(W, dim = 2), torch.softmax(H, dim = 2)
+        W, H = 2 * self.B * W, 2 * self.B * H
+        D = F.softplus(D)
+        z, ld = unconstrained_RQS(
+            x, W, H, D, inverse=False, tail_bound=self.B)
+        log_det += torch.sum(ld, dim = 1)
+        z = z.flip(dims=(1,))
+        return z, log_det
+
+    def inverse(self, z, train = False):
+        # we have to decode the x one at a time, sequentially
+        x = torch.zeros_like(z)
+        log_det = torch.zeros(z.shape[0])
+        z = z.flip(dims=(1,)) 
+        for i in range(self.dim):
+            out = self.net(x.clone()).reshape(-1, self.dim, 3 * self.K - 1)
+            W, H, D = torch.split(out, self.K, dim = 2)
+            W, H = torch.softmax(W, dim = 2), torch.softmax(H, dim = 2)
+            W, H = 2 * self.B * W, 2 * self.B * H
+            D = F.softplus(D)            
+            x[:, i], ld = unconstrained_RQS(
+                z[:, i], W[:, i, :], H[:, i, :], D[:, i, :], inverse=True, tail_bound=self.B)
+            log_det += ld
+        return x, log_det
+
+
+class NSF_CL(nn.Module):
+    """
+    Neural spline flow, coupling layer.
+
+    [Durkan et al. 2019]
+    """
+    # def __init__(self, dim, K = 5, B = 3, subdomain = 1, hidden_dim = 150, base_network = 'FCNN'):
+    def __init__(self, dim, K = 5, B = 3, nx = 1, ny = 1, block_x = 1, block_y = 1, 
+            hidden_dim = [50], conv_filter = [32, 16], conv_kernel = [9, 9], pool = 2,
+            base_network = 'FCNN'):
+        super().__init__()
+        self.dim = dim
+        self.subdomain = block_x * block_y
+        x_dim = np.linspace(0, nx, block_x+1, dtype = 'int32')[1:]
+        x_dim[1:] -= x_dim[:-1].copy()
+        y_dim = np.linspace(0, ny, block_y+1, dtype = 'int32')[1:]
+        y_dim[1:] -= y_dim[:-1].copy()
+        self.sub_dim = (x_dim.reshape(-1, 1) * y_dim).reshape(-1)
+        self.cum_dim = np.insert(np.cumsum(self.sub_dim), 0, 0)
+
+        self.K = K
+        self.B = B
+
+        self.f0s = nn.ModuleList()
+        self.f1s = nn.ModuleList()
+        for i in range(self.subdomain):
+            if base_network == 'FCNN':
+                self.f0s += [FCNN(self.sub_dim[i] - self.sub_dim[i] // 2, \
+                                self.sub_dim[i] // 2 * (3 * K - 1), hidden_dim)]
+                self.f1s += [FCNN(self.sub_dim[i] // 2, \
+                                (self.sub_dim[i] - self.sub_dim[i] // 2) * (3 * K - 1), hidden_dim)]
+            else:
+                self.f0s += [
+                    CNN1D(self.sub_dim[i] - self.sub_dim[i] // 2, self.sub_dim[i] // 2 * (3 * K - 1),
+                        hidden_dim, conv_filter = conv_filter, conv_kernel = conv_kernel, pool = pool
+                    )
+                ]
+                self.f1s += [
+                    CNN1D(self.sub_dim[i] // 2, (self.sub_dim[i] - self.sub_dim[i] // 2) * (3 * K - 1),
+                        hidden_dim, conv_filter = conv_filter, conv_kernel = conv_kernel, pool = pool
+                    )
+                ]
+
+    def forward(self, x, train = True):
+        log_det = torch.zeros(x.shape[0])
+        z = torch.zeros_like(x)
+        for i in range(self.subdomain):
+            x0, x1 = x[:, self.cum_dim[i]:self.cum_dim[i+1]].chunk(2, dim = 1)
+            out = self.f0s[i](x0).reshape(-1, self.sub_dim[i] // 2, 3 * self.K - 1)
+            W, H, D = torch.split(out, self.K, dim = 2)
+            W, H = torch.softmax(W, dim = 2), torch.softmax(H, dim = 2)
+            W, H = 2 * self.B * W, 2 * self.B * H
+            D = F.softplus(D)
+            x1, ld = unconstrained_RQS(
+                x1, W, H, D, inverse=False, tail_bound=self.B)
+            log_det += torch.sum(ld, dim = 1)
+
+            out = self.f1s[i](x1).reshape(-1, self.sub_dim[i] - self.sub_dim[i] // 2, 3 * self.K - 1)
+            W, H, D = torch.split(out, self.K, dim = 2)
+            W, H = torch.softmax(W, dim = 2), torch.softmax(H, dim = 2)
+            W, H = 2 * self.B * W, 2 * self.B * H
+            D = F.softplus(D)
+            x0, ld = unconstrained_RQS(
+                x0, W, H, D, inverse=False, tail_bound=self.B)
+            log_det += torch.sum(ld, dim = 1)
+
+            z[:, self.cum_dim[i]:self.cum_dim[i+1]] = torch.cat([x0, x1], dim =1)
+
+        return z, log_det
+        
+    def inverse(self, z):
+        log_det = torch.zeros(z.shape[0])
+        x = torch.zeros_like(z)
+        for i in range(self.subdomain):
+            z0, z1 = z[: self.cum_dim[i]:self.cum_dim[i+1]].chunk(2, dim = 1)
+            out = self.f1s[i](z1).reshape(-1, self.sub_dim[i] - self.sub_dim[i] // 2, 3 * self.K - 1)
+            W, H, D = torch.split(out, self.K, dim = 2)
+            W, H = torch.softmax(W, dim = 2), torch.softmax(H, dim = 2)
+            W, H = 2 * self.B * W, 2 * self.B * H
+            D = F.softplus(D)
+            z0, ld = unconstrained_RQS(
+                z0, W, H, D, inverse=True, tail_bound=self.B)
+            log_det += torch.sum(ld, dim = 1)
+
+            out = self.f0s[i](z0).reshape(-1, self.sub_dim[i] // 2, 3 * self.K - 1)
+            W, H, D = torch.split(out, self.K, dim = 2)
+            W, H = torch.softmax(W, dim = 2), torch.softmax(H, dim = 2)
+            W, H = 2 * self.B * W, 2 * self.B * H
+            D = F.softplus(D)
+            z1, ld = unconstrained_RQS(
+                z1, W, H, D, inverse = True, tail_bound = self.B)
+            log_det += torch.sum(ld, dim = 1)
+
+            x[:, self.cum_dim[i]:self.cum_dim[i+1]] = torch.cat([z0, z1], dim =1)
+
+        return x, log_det
