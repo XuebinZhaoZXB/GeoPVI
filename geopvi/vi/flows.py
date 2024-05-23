@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from torch.autograd import Function
 import scipy.sparse as sparse
 import scipy.sparse.linalg as linalg
-from vi.utils import *
+from geopvi.vi.utils import *
 
 """
 The field of normalising flows is developing very fast, in this package we 
@@ -337,10 +337,10 @@ class RealNVP(nn.Module):
         # x0, x1 = x[:,::2], x[:,1::2]
         x0, x1 = x.chunk(2, dim = 1)
         t0_transformed = self.t0(x0)
-        s0_transformed = torch.tanh(self.s0(x0))
+        s0_transformed = self.s0(x0)
         x1 = t0_transformed + x1 * torch.exp(s0_transformed)
         t1_transformed = self.t1(x1)
-        s1_transformed = torch.tanh(self.s1(x1))
+        s1_transformed = self.s1(x1)
         x0 = t1_transformed + x0 * torch.exp(s1_transformed)
         log_det = torch.sum(s0_transformed, dim=1) + \
                   torch.sum(s1_transformed, dim=1)
@@ -352,10 +352,10 @@ class RealNVP(nn.Module):
         # z0, z1 = z[:,::2], z[:,1::2]
         z0, z1 = z.chunk(2, dim = 1)
         t1_transformed = self.t1(z1)
-        s1_transformed = torch.tanh(self.s1(z1))
+        s1_transformed = self.s1(z1)
         z0 = (z0 - t1_transformed) * torch.exp(-s1_transformed)
         t0_transformed = self.t0(z0)
-        s0_transformed = torch.tanh(self.s0(z0))
+        s0_transformed = self.s0(z0)
         z1 = (z1 - t0_transformed) * torch.exp(-s0_transformed)
         log_det = torch.sum(-s0_transformed, dim=1) + \
                   torch.sum(-s1_transformed, dim=1)

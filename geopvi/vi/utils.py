@@ -264,7 +264,8 @@ class FCNN(nn.Module):
             self.network.extend([
                     nn.Linear(h0, h1),
                     # nn.BatchNorm1d(h1),
-                    nn.Tanh(),
+                    # nn.Tanh(),
+                    nn.LeakyReLU(0.2),
                 ])
         self.network.extend([nn.Linear(h1, out_dim)])
         self.network = nn.Sequential(*self.network)

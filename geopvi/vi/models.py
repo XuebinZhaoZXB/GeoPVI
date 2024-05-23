@@ -119,19 +119,14 @@ class VariationalInversion():
                 print(f'The elapsed time is: {end-start:.2f} s')
 
                 # Save intermediate model parameters
-                if save_intermediate_result:
-                    # param = get_flow_param(model.flows[-2])
-                    # name = os.path.join(args.basepath, args.outdir, f'{args.flow}_{args.kernel}_ite{i}_parameter.npy')
-                    # np.save(name, param)
-                    
+                if save_intermediate_result:                    
                     np.savetxt('loss_intermediate.txt', loss)
 
                     # # If you want to get posterior samples and save them, you can use the following:
-                    # x = torch.as_tensor(gen_sample(2000, ndim, para1 = lower, para2 = upper, ini=args.ini_dist))
-                    # z = model.sample(x)
-                    # z = z.data.numpy()
-                    # name = os.path.join(args.basepath, args.outdir, f'{args.flow}_{args.kernel}_ite{i}_sample.npy')
-                    # np.save(name, z)
+                    self.variationalDistribution.eval()
+                    samples = self.variationalDistribution.sample(2000).data.numpy()
+                    np.save('samples_intermediate.npy', samples)
+                    self.variationalDistribution.train()
 
                     # save intermediate normalising flows model
                     torch.save({
