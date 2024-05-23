@@ -5,6 +5,7 @@ import torch.nn as nn
 import torch.nn.init as init
 import torch.nn.functional as F
 from torch.autograd import Function
+import scipy
 import scipy.sparse as sparse
 import scipy.sparse.linalg as linalg
 from geopvi.vi.utils import *
@@ -499,8 +500,8 @@ class OneByOneConv(nn.Module):
     def __init__(self, dim):
         super().__init__()
         self.dim = dim
-        W, _ = sp.linalg.qr(np.random.randn(dim, dim))
-        P, L, U = sp.linalg.lu(W)
+        W, _ = scipy.linalg.qr(np.random.randn(dim, dim))
+        P, L, U = scipy.linalg.lu(W)
         self.P = torch.tensor(P, dtype = torch.float)
         self.L = nn.Parameter(torch.tensor(L, dtype = torch.float))
         self.S = nn.Parameter(torch.tensor(np.diag(U), dtype = torch.float))
