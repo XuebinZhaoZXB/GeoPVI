@@ -58,7 +58,8 @@ class VariationalDistribution(nn.Module):
         x = z
         return x, log_det
  
-    def sample(self, x):
+    def sample(self, nsamples):
+        x = self.sample_from_base(nsamples)
         for flow in self.flows:
             x, _ = flow.forward(x, train = False)
         return x
