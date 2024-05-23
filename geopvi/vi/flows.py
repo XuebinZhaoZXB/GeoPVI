@@ -51,6 +51,7 @@ class Real2Constr(nn.Module):
     Transform from space of real numbers to a constrained space
     """
     def __init__(self, lower = None, upper = None):
+        ### TODO update with dim attribute
         super().__init__()
         # self.dim = dim
         self.upper = torch.tensor(upper)
@@ -93,6 +94,7 @@ class Constr2Real(nn.Module):
     Transform from a constrained space to space of real numbers
     """
     def __init__(self, lower = None, upper = None):
+        ### TODO update with dim attribute
         super().__init__()
         # self.dim = dim
         self.upper = torch.tensor(upper)
