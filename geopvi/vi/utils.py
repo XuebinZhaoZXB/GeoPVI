@@ -252,7 +252,7 @@ class MaskedNN(nn.Module):
         return self.net(x)
 
 
-class FCNN(nn.Module):
+class MLP(nn.Module):
     """
     Simple fully connected neural network.
     """

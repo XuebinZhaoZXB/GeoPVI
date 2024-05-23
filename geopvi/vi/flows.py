@@ -324,7 +324,7 @@ class RealNVP(nn.Module):
 
     [Dinh et. al. 2017 - ICLR]
     """
-    def __init__(self, dim, hidden_dim = [100], base_network = FCNN):
+    def __init__(self, dim, hidden_dim = [100], base_network = MLP):
         super().__init__()
         self.dim = dim
         self.t0 = base_network(dim - dim // 2, dim // 2, hidden_dim)
@@ -370,7 +370,7 @@ class SIAF(nn.Module):
 
     [Kingma et al. 2016]
     """
-    def __init__(self, dim, hidden_dim = [8], base_network=FCNN):
+    def __init__(self, dim, hidden_dim = [8], base_network=MLP):
         super().__init__()
         self.dim = dim
         self.layers = nn.ModuleList()
@@ -627,7 +627,7 @@ class NSF_SAR(nn.Module):
 
     [Durkan et al. 2019]
     """
-    def __init__(self, dim, K = 8, B = 3, hidden_dim = 50, base_network = FCNN):
+    def __init__(self, dim, K = 8, B = 3, hidden_dim = 50, base_network = MLP):
         super().__init__()
         self.dim = dim
         self.K = K
@@ -751,10 +751,10 @@ class NSF_CL(nn.Module):
 
     [Durkan et al. 2019]
     """
-    # def __init__(self, dim, K = 5, B = 3, subdomain = 1, hidden_dim = 150, base_network = 'FCNN'):
+    # def __init__(self, dim, K = 5, B = 3, subdomain = 1, hidden_dim = 150, base_network = 'MLP'):
     def __init__(self, dim, K = 5, B = 3, nx = 1, ny = 1, block_x = 1, block_y = 1, 
             hidden_dim = [50], conv_filter = [32, 16], conv_kernel = [9, 9], pool = 2,
-            base_network = 'FCNN'):
+            base_network = 'MLP'):
         super().__init__()
         self.dim = dim
         self.subdomain = block_x * block_y
@@ -771,10 +771,10 @@ class NSF_CL(nn.Module):
         self.f0s = nn.ModuleList()
         self.f1s = nn.ModuleList()
         for i in range(self.subdomain):
-            if base_network == 'FCNN':
-                self.f0s += [FCNN(self.sub_dim[i] - self.sub_dim[i] // 2, \
+            if base_network == 'MLP':
+                self.f0s += [MLP(self.sub_dim[i] - self.sub_dim[i] // 2, \
                                 self.sub_dim[i] // 2 * (3 * K - 1), hidden_dim)]
-                self.f1s += [FCNN(self.sub_dim[i] // 2, \
+                self.f1s += [MLP(self.sub_dim[i] // 2, \
                                 (self.sub_dim[i] - self.sub_dim[i] // 2) * (3 * K - 1), hidden_dim)]
             else:
                 self.f0s += [
