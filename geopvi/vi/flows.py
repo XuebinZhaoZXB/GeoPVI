@@ -148,7 +148,7 @@ class Linear(nn.Module):
     structured: part of disgonals are considered - PSVI
     fullrank: all elements of L - full rank ADVI
     """
-    def __init__(self, dim, kernel = 'diagonal', mask = None, param = None):
+    def __init__(self, dim, kernel = 'diagonal', mask = None, param = None, trainable = True):
         super().__init__()
         self.dim = dim
         self.kernel = kernel
@@ -187,6 +187,13 @@ class Linear(nn.Module):
                     # else:
                     #     # TODO: consider param only provides part of off-diagonal blocks
                     #     raise ValueError("Shape of mask and parameter does not match!")
+        if trainable is False:
+            # Add this trainable feature, such that Linear flow can be used as 
+            # a linear transform with fixed/predefined (not learnable) parameters during inversion
+            self.u.requires_grad = False
+            self.diag.requires_grad = False
+            if kernel != 'diagonal':
+                self.non_diag.requires_grad = False
 
     def create_lower_triangular(self, diagonal=0):
         lower = torch.zeros((self.dim, self.dim))
@@ -194,7 +201,7 @@ class Linear(nn.Module):
             lower[np.tril_indices(self.dim, diagonal)] = self.non_diag
         return lower
 
-    def forward(self, x):
+    def forward(self, x, train = True):
         diag = torch.exp(self.diag)
         if self.kernel == 'fullrank':
             L = torch.diag(diag) + self.create_lower_triangular(diagonal=-1)
@@ -364,7 +371,6 @@ class RealNVP(nn.Module):
         return torch.cat([z0, z1], dim = 1), log_det
 
 
-
 class SIAF(nn.Module):
     """
     Inverse auto-regressive flow using slow version with explicit networks per dim
@@ -477,8 +483,8 @@ class ActNorm(nn.Module):
     def __init__(self, dim):
         super().__init__()
         self.dim = dim
-        self.mu = nn.Parameter(torch.zeros(dim, dtype = torch.float))
-        self.log_sigma = nn.Parameter(torch.zeros(dim, dtype = torch.float))
+        self.mu = nn.Parameter(torch.zeros(dim))
+        self.log_sigma = nn.Parameter(torch.zeros(dim))
 
     def forward(self, x, train = True):
         z = x * torch.exp(self.log_sigma) + self.mu
@@ -488,79 +494,6 @@ class ActNorm(nn.Module):
     def inverse(self, z):
         x = (z - self.mu) / torch.exp(self.log_sigma)
         log_det = -torch.sum(self.log_sigma)
-        return x, log_det
-
-
-class OneByOneConv(nn.Module):
-    """
-    Invertible 1x1 convolution.
-
-    [Kingma and Dhariwal, 2018.]
-    """
-    def __init__(self, dim):
-        super().__init__()
-        self.dim = dim
-        W, _ = scipy.linalg.qr(np.random.randn(dim, dim))
-        P, L, U = scipy.linalg.lu(W)
-        self.P = torch.tensor(P, dtype = torch.float)
-        self.L = nn.Parameter(torch.tensor(L, dtype = torch.float))
-        self.S = nn.Parameter(torch.tensor(np.diag(U), dtype = torch.float))
-        self.U = nn.Parameter(torch.triu(torch.tensor(U, dtype = torch.float),
-                              diagonal = 1))
-        self.W_inv = None
-
-    def forward(self, x, train = True):
-        L = torch.tril(self.L, diagonal = -1) + torch.diag(torch.ones(self.dim))
-        U = torch.triu(self.U, diagonal = 1)
-        z = x @ self.P @ L @ (U + torch.diag(self.S))
-        log_det = torch.sum(torch.log(torch.abs(self.S)))
-        return z, log_det
-
-    def inverse(self, z):
-        if not self.W_inv:
-            L = torch.tril(self.L, diagonal = -1) + \
-                torch.diag(torch.ones(self.dim))
-            U = torch.triu(self.U, diagonal = 1)
-            W = self.P @ L @ (U + torch.diag(self.S))
-            self.W_inv = torch.inverse(W)
-        x = z @ self.W_inv
-        log_det = -torch.sum(torch.log(torch.abs(self.S)))
-        return x, log_det
-
-
-class Invertible1x1Conv(nn.Module):
-    """ 
-    As introduced in Glow paper.
-    """
-    
-    def __init__(self, dim):
-        super().__init__()
-        self.dim = dim
-        Q = torch.nn.init.orthogonal_(torch.randn(dim, dim))
-        P, L, U = torch.lu_unpack(*Q.lu())
-        self.P = P # remains fixed during optimization
-        self.L = nn.Parameter(L) # lower triangular portion
-        self.S = nn.Parameter(U.diag()) # "crop out" the diagonal to its own parameter
-        self.U = nn.Parameter(torch.triu(U, diagonal=1)) # "crop out" diagonal, stored in S
-
-    def _assemble_W(self):
-        """ assemble W from its pieces (P, L, U, S) """
-        L = torch.tril(self.L, diagonal=-1) + torch.diag(torch.ones(self.dim))
-        U = torch.triu(self.U, diagonal=1)
-        W = self.P @ L @ (U + torch.diag(self.S))
-        return W
-
-    def forward(self, x, train = True):
-        W = self._assemble_W()
-        z = x @ W
-        log_det = torch.sum(torch.log(torch.abs(self.S)))
-        return z, log_det
-
-    def inverse(self, z):
-        W = self._assemble_W()
-        W_inv = torch.inverse(W)
-        x = z @ W_inv
-        log_det = -torch.sum(torch.log(torch.abs(self.S)))
         return x, log_det
 
 
@@ -609,7 +542,7 @@ class NSF_SAR(nn.Module):
 
     [Durkan et al. 2019]
     """
-    def __init__(self, dim, K = 8, B = 3, hidden_dim = 50, base_network = MLP):
+    def __init__(self, dim, K = 8, B = 3, hidden_dim = 10, base_network = MLP):
         super().__init__()
         self.dim = dim
         self.K = K
@@ -733,49 +666,41 @@ class NSF_CL(nn.Module):
 
     [Durkan et al. 2019]
     """
-    # def __init__(self, dim, K = 5, B = 3, subdomain = 1, hidden_dim = 150, base_network = 'MLP'):
-    def __init__(self, dim, K = 5, B = 3, nx = 1, ny = 1, block_x = 1, block_y = 1, 
-            hidden_dim = [50], conv_filter = [32, 16], conv_kernel = [9, 9], pool = 2,
-            base_network = 'MLP'):
+    def __init__(self, dim, K = 5, B = 3, block = 1, hidden_dim = [50], 
+                conv_filter = [32, 16], conv_kernel = [9, 9], pool = 2, base_network = 'MLP'):
         super().__init__()
         self.dim = dim
-        self.subdomain = block_x * block_y
-        x_dim = np.linspace(0, nx, block_x+1, dtype = 'int32')[1:]
-        x_dim[1:] -= x_dim[:-1].copy()
-        y_dim = np.linspace(0, ny, block_y+1, dtype = 'int32')[1:]
-        y_dim[1:] -= y_dim[:-1].copy()
-        self.sub_dim = (x_dim.reshape(-1, 1) * y_dim).reshape(-1)
-        self.cum_dim = np.insert(np.cumsum(self.sub_dim), 0, 0)
-
+        self.block_index = np.linspace(0, dim, block + 1, dtype = 'int')
         self.K = K
         self.B = B
 
         self.f0s = nn.ModuleList()
         self.f1s = nn.ModuleList()
-        for i in range(self.subdomain):
+        for i in range(block):
+            block_dim = np.diff(self.block_index)[i]
             if base_network == 'MLP':
-                self.f0s += [MLP(self.sub_dim[i] - self.sub_dim[i] // 2, \
-                                self.sub_dim[i] // 2 * (3 * K - 1), hidden_dim)]
-                self.f1s += [MLP(self.sub_dim[i] // 2, \
-                                (self.sub_dim[i] - self.sub_dim[i] // 2) * (3 * K - 1), hidden_dim)]
+                self.f0s += [MLP(block_dim - block_dim // 2, block_dim // 2 * (3 * K - 1), hidden_dim)]
+                self.f1s += [MLP(block_dim // 2, (block_dim - block_dim // 2) * (3 * K - 1), hidden_dim)]
             else:
-                self.f0s += [
-                    CNN1D(self.sub_dim[i] - self.sub_dim[i] // 2, self.sub_dim[i] // 2 * (3 * K - 1),
-                        hidden_dim, conv_filter = conv_filter, conv_kernel = conv_kernel, pool = pool
-                    )
-                ]
-                self.f1s += [
-                    CNN1D(self.sub_dim[i] // 2, (self.sub_dim[i] - self.sub_dim[i] // 2) * (3 * K - 1),
-                        hidden_dim, conv_filter = conv_filter, conv_kernel = conv_kernel, pool = pool
-                    )
-                ]
+                self.f0s += [CNN1D(
+                                    block_dim - block_dim // 2, block_dim // 2 * (3 * K - 1),
+                                    hidden_dim, conv_filter = conv_filter, conv_kernel = conv_kernel, pool = pool
+                                )
+                            ]
+                self.f1s += [CNN1D(
+                                    block_dim // 2, (block_dim - block_dim // 2) * (3 * K - 1),
+                                    hidden_dim, conv_filter = conv_filter, conv_kernel = conv_kernel, pool = pool
+                                )
+                            ]
 
     def forward(self, x, train = True):
         log_det = torch.zeros(x.shape[0])
         z = torch.zeros_like(x)
-        for i in range(self.subdomain):
-            x0, x1 = x[:, self.cum_dim[i]:self.cum_dim[i+1]].chunk(2, dim = 1)
-            out = self.f0s[i](x0).reshape(-1, self.sub_dim[i] // 2, 3 * self.K - 1)
+        for i in range(len(self.block_index) - 1):
+            index1, index2 = self.block_index[i:i+2]
+            block_dim = index2 - index1
+            x0, x1 = x[:, index1 : index2].chunk(2, dim = 1)
+            out = self.f0s[i](x0).reshape(-1, block_dim // 2, 3 * self.K - 1)
             W, H, D = torch.split(out, self.K, dim = 2)
             W, H = torch.softmax(W, dim = 2), torch.softmax(H, dim = 2)
             W, H = 2 * self.B * W, 2 * self.B * H
@@ -784,7 +709,7 @@ class NSF_CL(nn.Module):
                 x1, W, H, D, inverse=False, tail_bound=self.B)
             log_det += torch.sum(ld, dim = 1)
 
-            out = self.f1s[i](x1).reshape(-1, self.sub_dim[i] - self.sub_dim[i] // 2, 3 * self.K - 1)
+            out = self.f1s[i](x1).reshape(-1, block_dim - block_dim // 2, 3 * self.K - 1)
             W, H, D = torch.split(out, self.K, dim = 2)
             W, H = torch.softmax(W, dim = 2), torch.softmax(H, dim = 2)
             W, H = 2 * self.B * W, 2 * self.B * H
@@ -793,16 +718,19 @@ class NSF_CL(nn.Module):
                 x0, W, H, D, inverse=False, tail_bound=self.B)
             log_det += torch.sum(ld, dim = 1)
 
-            z[:, self.cum_dim[i]:self.cum_dim[i+1]] = torch.cat([x0, x1], dim =1)
+            z[:, index1 : index2] = torch.cat([x0, x1], dim =1)
 
         return z, log_det
         
     def inverse(self, z):
         log_det = torch.zeros(z.shape[0])
         x = torch.zeros_like(z)
-        for i in range(self.subdomain):
-            z0, z1 = z[: self.cum_dim[i]:self.cum_dim[i+1]].chunk(2, dim = 1)
-            out = self.f1s[i](z1).reshape(-1, self.sub_dim[i] - self.sub_dim[i] // 2, 3 * self.K - 1)
+        for i in range(len(self.block_index) - 1):
+            index1, index2 = self.block_index[i:i+2]
+            block_dim = index2 - index1
+
+            z0, z1 = z[: index1 : index2].chunk(2, dim = 1)
+            out = self.f1s[i](z1).reshape(-1, block_dim - block_dim // 2, 3 * self.K - 1)
             W, H, D = torch.split(out, self.K, dim = 2)
             W, H = torch.softmax(W, dim = 2), torch.softmax(H, dim = 2)
             W, H = 2 * self.B * W, 2 * self.B * H
@@ -811,7 +739,7 @@ class NSF_CL(nn.Module):
                 z0, W, H, D, inverse=True, tail_bound=self.B)
             log_det += torch.sum(ld, dim = 1)
 
-            out = self.f0s[i](z0).reshape(-1, self.sub_dim[i] // 2, 3 * self.K - 1)
+            out = self.f0s[i](z0).reshape(-1, block_dim // 2, 3 * self.K - 1)
             W, H, D = torch.split(out, self.K, dim = 2)
             W, H = torch.softmax(W, dim = 2), torch.softmax(H, dim = 2)
             W, H = 2 * self.B * W, 2 * self.B * H
@@ -820,6 +748,6 @@ class NSF_CL(nn.Module):
                 z1, W, H, D, inverse = True, tail_bound = self.B)
             log_det += torch.sum(ld, dim = 1)
 
-            x[:, self.cum_dim[i]:self.cum_dim[i+1]] = torch.cat([z0, z1], dim =1)
+            x[:, index1 : index2] = torch.cat([z0, z1], dim =1)
 
         return x, log_det
