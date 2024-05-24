@@ -564,7 +564,7 @@ class Invertible1x1Conv(nn.Module):
         return x, log_det
 
 
-class Reverse_order(nn.Module):
+class ReverseOrder(nn.Module):
     """
     Reverse the order of the input vector
     """
@@ -585,31 +585,12 @@ class Reverse_order(nn.Module):
 
 class Permute(nn.Module):
     """
-    Random permute (or re-order) model parameters
+    Random permute (or re-order) model parameters to change the role of 
+    copying and transforming in the coupling layer
     """
-    def __init__(self, dim, seed = 1, nx = 1, ny = 1, block_x = 1, block_y = 1, last_flow = False):
+    def __init__(self, dim):
         super().__init__()
-        subdomain = block_x * block_y
-        self.seed = seed
-        self.last_flow = last_flow
-        rng = np.random.RandomState(seed)
-
-        x_dim = np.linspace(0, nx, block_x+1, dtype = 'int32')[1:]
-        x_dim[1:] -= x_dim[:-1].copy()
-        y_dim = np.linspace(0, ny, block_y+1, dtype = 'int32')[1:]
-        y_dim[1:] -= y_dim[:-1].copy()
-        sub_dim = (x_dim.reshape(-1, 1) * y_dim).reshape(-1)
-        cum_dim = np.insert(np.cumsum(sub_dim), 0, 0)
-
-        if self.last_flow is False:
-            self.index = np.zeros(dim, dtype = 'int32')
-            for i in range(subdomain):
-                self.index[cum_dim[i]:cum_dim[i+1]] = rng.permutation(sub_dim[i]) + cum_dim[i]
-        else:
-            self.index = np.concatenate(
-                [np.concatenate(
-                    [np.arange(cum_dim[i*block_y + j], cum_dim[i*block_y + j + 1]).reshape(x_dim[i], y_dim[j])
-                    for j in range(block_y)], axis = 1) for i in range(block_x)], axis = 0).reshape(-1)
+        self.index = np.random.permutation(dim)
     
     def forward(self, x, train = True):
         z = x[:, self.index]
