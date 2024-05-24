@@ -31,12 +31,12 @@ if __name__ == "__main__":
     argparser.add_argument("--basepath", metavar='basepath', type=str, help='Project path',
                             default='/lustre03/other/2029iw/study/00_GeoPVI/examples/tomo2d/')
 
-    argparser.add_argument("--flow", default='Linear', type=str)
+    argparser.add_argument("--flow", default='NSF_CL', type=str)
     argparser.add_argument("--kernel", default='fullrank', type=str)
-    argparser.add_argument("--nflow", default=1, type=int)
+    argparser.add_argument("--nflow", default=6, type=int)
     argparser.add_argument("--nsample", default=10, type=int)
     argparser.add_argument("--prcs", default=10, type=int)
-    argparser.add_argument("--iterations", default=5000, type=int)
+    argparser.add_argument("--iterations", default=3000, type=int)
     argparser.add_argument("--lr", default=0.001, type=float)
     argparser.add_argument("--ini_dist", default='Normal', type=str)
     argparser.add_argument("--sigma", default=0.05, type=float)
@@ -133,7 +133,11 @@ if __name__ == "__main__":
 
     # define flows model
     flow = eval(args.flow)
-    flows = [flow(dim = ndim, kernel = args.kernel) for _ in range(args.nflow)]
+    # flows = [flow(dim = ndim, kernel = args.kernel) for _ in range(args.nflow)]
+    flows = [Linear(dim = ndim, param = np.hstack([np.zeros(ndim), np.full((ndim,), 1.6)]), trainable = False)]
+    # flows = []
+    for i in range(args.nflow):
+        flows += [Permute(dim = ndim), flow(dim = ndim, K = 8, B = 3, hidden_dim = [64, 128])]
 
     # if the initial distribution of flow model is a Uniform distribution, 
     # then add a flow to transform from constrained to real space
@@ -168,13 +172,18 @@ if __name__ == "__main__":
 
     # Perform variational inversion
     loss_his.extend(
-                        inversion.update(optimizer = optimizer, n_iter = args.iterations, 
-                                        nsample = args.nsample, n_out = args.nout, verbose = True)
+                    inversion.update(optimizer = optimizer, n_iter = args.iterations, nsample = args.nsample, 
+                            save_intermediate_result = args.save_intermediate_result, n_out = args.nout, verbose = True)
                     )
 
-    param = get_flow_param(variational.flows[-2])
-    name = os.path.join(args.basepath, args.outdir, f'{args.flow}_{args.kernel}_parameter.npy')
-    np.save(name, param)
+    # param = get_flow_param(variational.flows[-2])
+    # name = os.path.join(args.basepath, args.outdir, f'{args.flow}_{args.kernel}_parameter.npy')
+    # np.save(name, param)
+
+    variational.eval()
+    samples = variational.sample(3000).data.numpy()
+    name = os.path.join(args.basepath, args.outdir, f'{args.flow}_{args.kernel}_samples.npy')
+    np.save(name, samples)
 
     name = os.path.join(args.basepath, args.outdir, f'{args.flow}_{args.kernel}_loss.txt')
     np.savetxt(name, loss_his)
