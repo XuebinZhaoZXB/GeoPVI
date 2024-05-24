@@ -11,9 +11,9 @@ import scipy.sparse.linalg as linalg
 from geopvi.vi.utils import *
 
 """
-The field of normalising flows is developing very fast, in this package we 
-just implemented several flows that are tested to be effective as of 2021.
-Feel free to add more flows!
+The field of normalising flows is developing very fast, in this package 
+we just implemented several flows that are tested to be effective as of 2020 in our GJI paper.
+Feel free to add new flows that you think is useful!
 """
 
 # supported non-linearities: note that the function must be invertible
@@ -57,12 +57,21 @@ class Real2Constr(nn.Module):
     """
     Transform from space of real numbers to a constrained space
     """
-    def __init__(self, lower = None, upper = None):
-        ### TODO update with dim attribute
+    def __init__(self, dim, lower = None, upper = None):
         super().__init__()
-        # self.dim = dim
-        self.upper = torch.tensor(upper)
-        self.lower = torch.tensor(lower)
+        self.dim = dim
+        if upper is None:
+            self.upper = None
+        else:
+            if np.isscalar(upper):
+                upper = np.full((dim,) upper)
+            self.upper = torch.from_numpy(upper)
+        if lower is None:
+            self.lower = None
+        else:
+            if np.isscalar(lower):
+                lower = np.full((dim,) lower)
+            self.lower = torch.from_numpy(lower)
 
     def forward(self, x, train = True):
         if self.lower is None and self.upper is None:
@@ -100,12 +109,21 @@ class Constr2Real(nn.Module):
     """
     Transform from a constrained space to space of real numbers
     """
-    def __init__(self, lower = None, upper = None):
-        ### TODO update with dim attribute
+    def __init__(self, dim, lower = None, upper = None):
         super().__init__()
-        # self.dim = dim
-        self.upper = torch.tensor(upper)
-        self.lower = torch.tensor(lower)
+        self.dim = dim
+        if upper is None:
+            self.upper = None
+        else:
+            if np.isscalar(upper):
+                upper = np.full((dim,) upper)
+            self.upper = torch.from_numpy(upper)
+        if lower is None:
+            self.lower = None
+        else:
+            if np.isscalar(lower):
+                lower = np.full((dim,) lower)
+            self.lower = torch.from_numpy(lower)
 
     def forward(self, x, train = True):
         if self.lower is None and self.upper is None:
@@ -143,12 +161,21 @@ class Linear(nn.Module):
     """
     Pytorch implementation for a linear transform: z = u + Lx
     If this flow is used for ADVI, then the covariance matrix is \Sigma = L^T.L
-    Different methods (kernels) are provided to constrcut L, including:
-    diagonal: only diagonal of L is considered, ignore correlations - mean field ADVI
-    structured: part of disgonals are considered - PSVI
-    fullrank: all elements of L - full rank ADVI
     """
     def __init__(self, dim, kernel = 'diagonal', mask = None, param = None, trainable = True):
+        """
+        Different methods (kernel) are provided to constrcut L, including:
+            diagonal: only diagonal of L is considered, ignore correlations - mean field ADVI
+            structured: part of disgonals are considered - PSVI
+            fullrank: all elements of L - full rank ADVI
+        mask: If PSVI is used, we need to define a mask specificing which off diagonals are considered
+        param: Initial parameters provided for Linear flow parameters
+                mainly used for FWI where high frequency inversion is initialised using the results from low frequency inversion
+        trainable: 
+                Ture: this Linear flow is used as it is to transform a pdf
+                False: the parameters of this Linear flow is set to be non-trainable parameters;
+                        purely used as a linear transform function with fixed/predefined parameters
+        """
         super().__init__()
         self.dim = dim
         self.kernel = kernel
@@ -188,8 +215,10 @@ class Linear(nn.Module):
                     #     # TODO: consider param only provides part of off-diagonal blocks
                     #     raise ValueError("Shape of mask and parameter does not match!")
         if trainable is False:
-            # Add this trainable feature, such that Linear flow can be used as 
-            # a linear transform with fixed/predefined (not learnable) parameters during inversion
+            """
+            Add this trainable feature, such that Linear flow can be used as 
+            a linear transform with fixed/predefined (not learnable) parameters during inversion
+            """
             self.u.requires_grad = False
             self.diag.requires_grad = False
             if kernel != 'diagonal':
@@ -333,6 +362,11 @@ class RealNVP(nn.Module):
     [Dinh et. al. 2017 - ICLR]
     """
     def __init__(self, dim, hidden_dim = [100], base_network = MLP):
+        """
+        hidden_dim: a list defining NN parameters for the base network 
+                    used to define the 1-2-1 transform in the coupling layer
+        base_network: can be MLP (multiple layer perceptron) or CNN
+        """
         super().__init__()
         self.dim = dim
         self.t0 = base_network(dim - dim // 2, dim // 2, hidden_dim)
@@ -378,6 +412,11 @@ class SIAF(nn.Module):
     [Kingma et al. 2016]
     """
     def __init__(self, dim, hidden_dim = [8], base_network=MLP):
+        """
+        hidden_dim: a list defining NN parameters for the base network 
+                    used to define the 1-2-1 transform in the coupling layer
+        base_network: can be MLP (multiple layer perceptron) or CNN
+        """
         super().__init__()
         self.dim = dim
         self.layers = nn.ModuleList()
@@ -429,6 +468,13 @@ class IAF(nn.Module):
     
     def __init__(self, dim, hidden_dim = [100], base_network=MaskedNN, \
                     renew_mask_every = 20, nmasks = 10):
+        """
+        hidden_dim: a list defining NN parameters for the base network 
+                    used to define the 1-2-1 transform in the coupling layer
+        base_network: is MaskedNN used to perfrom fast auto-regreessive transform
+        renew_mask_every: frequency to update the mask
+        More details can be found in Kingma et al. 2016
+        """
         super().__init__()
         self.dim = dim
         self.nmasks = nmasks
@@ -543,6 +589,12 @@ class NSF_SAR(nn.Module):
     [Durkan et al. 2019]
     """
     def __init__(self, dim, K = 8, B = 3, hidden_dim = 10, base_network = MLP):
+        """
+        hidden_dim: a list defining NN parameters for the base network 
+                    used to define the 1-2-1 transform in the coupling layer
+        base_network: can be MLP (multiple layer perceptron) or CNN
+        K & B: hyperparameters used to define Neural spline function
+        """
         super().__init__()
         self.dim = dim
         self.K = K
@@ -603,6 +655,13 @@ class NSF_AR(nn.Module):
     """
     def __init__(self, dim, K = 8, B = 3, hidden_dim = 100, base_network = MaskedNN, 
                     renew_mask_every = 100, nmasks = 1):
+        """
+        hidden_dim: a list defining NN parameters for the base network 
+                    used to define the 1-2-1 transform in the coupling layer
+        base_network: is MaskedNN used to perfrom fast auto-regreessive transform
+        renew_mask_every: frequency to update the mask
+        More details can be found in Kingma et al. 2016
+        """
         super().__init__()
         self.dim = dim
         self.K = K
@@ -668,6 +727,14 @@ class NSF_CL(nn.Module):
     """
     def __init__(self, dim, K = 5, B = 3, block = 1, hidden_dim = [50], 
                 conv_filter = [32, 16], conv_kernel = [9, 9], pool = 2, base_network = 'MLP'):
+        """
+        hidden_dim: a list defining NN parameters for the base network 
+                    used to define the 1-2-1 transform in the coupling layer
+        base_network: can be MLP (multiple layer perceptron) or CNN
+        block: number to divide the input model parameter m into sub-blocks, 
+                used for high D problems the flow when a large NN is needed for the coupling layer
+        K & B: hyperparameters used to define Neural spline function
+        """
         super().__init__()
         self.dim = dim
         self.block_index = np.linspace(0, dim, block + 1, dtype = 'int')
