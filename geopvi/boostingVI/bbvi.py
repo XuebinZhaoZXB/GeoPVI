@@ -1,6 +1,7 @@
 import numpy as np
 import torch
-from Variational.boostingvi.bvi import BVI
+from geopvi.boostingVI.bvi import BVI
+
 
 def projection_on_simplex(x):
     u = torch.sort(x, descending=True)[0]
@@ -15,7 +16,7 @@ def projection_on_simplex(x):
 
 class BBVI(BVI):
     def __init__(
-        self, logp, component_dist, lmb = lambda itr : 1, weight_method = 0, weight_init = 0,
+        self, component_dist, logp, lmb = lambda itr : 1, weight_method = 0, weight_init = 0,
         n_samples = 1, n_simplex_iters = 100, n_samples_w = 1, lr_w = 0.01, constrained = False, eps = None, **kw
     ):
         super().__init__(component_dist, **kw)
