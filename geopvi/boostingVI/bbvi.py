@@ -186,11 +186,6 @@ class BBVI(BVI):
             lf = self.logp(samples)
             out += weights[k] * ((lg - log_det).mean() - lf.mean())
         return out
-    
-    def _print_perf_w(self, itr, x, obj, grd):
-        if itr == 0:
-            print("{:^30}|{:^30}|{:^30}|{:^30}".format('Iteration', 'W', 'GradNorm', 'KL'))
-        print("{:^30}|{:^30}|{:^30.3f}|{:^30.3f}".format(itr, str(x), np.sqrt((grd**2).sum()), obj))
 
     def _get_mixture(self):
         #just get the unflattened params and weights; for KL BVI these correspond to mixture components
