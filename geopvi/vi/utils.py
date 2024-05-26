@@ -9,6 +9,43 @@ DEFAULT_MIN_BIN_HEIGHT = 1e-3
 DEFAULT_MIN_DERIVATIVE = 1e-3
 
 
+# supported non-linearities: note that the function must be invertible
+functional_derivatives = {
+    torch.tanh: lambda x: 1 - torch.pow(torch.tanh(x), 2),
+    F.leaky_relu: lambda x: (x > 0).type(torch.FloatTensor) + \
+                            (x < 0).type(torch.FloatTensor) * -0.01,
+    F.elu: lambda x: (x > 0).type(torch.FloatTensor) + \
+                     (x < 0).type(torch.FloatTensor) * torch.exp(x)
+}
+
+class TriangularSolve(Function):
+    @staticmethod
+    def forward(ctx, input, L):
+        '''
+        Solve triangular system L*x = b for x given L and b
+        L is parametrised by structured kernel with sparse diagonals
+        this assumes dimensionality of L is high such that you can't solve the above problem using triangular_solve
+        therefore L is represented as scipy.sparse.diags object and solved using scipy.linalg.spsolve_triangular
+        input: input tensor b (nsampls * ndim)
+        L: a sparse lower triangular matrix with cov = L@LT
+        grad: gradient of output (x) w.r.t. input (b) (nsamples * ndim)
+        '''
+        epsilons = linalg.spsolve_triangular(L.tocsr(), input.detach().numpy().T, lower = True)
+        grad = linalg.spsolve_triangular(L.tocsr(), np.eye(L.shape[0]), lower = True)
+        ctx.save_for_backward(input, torch.tensor(grad))
+        return torch.tensor(logp)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        '''
+        this function returns the gradient w.r.t the input tensor in the forward function
+        therefore, the return shape should be the same as the shape of input tensor
+        '''
+        input, grad = ctx.saved_tensors
+        grad_input = (grad_output @ grad)
+        return grad_input, None, None
+
+
 def searchsorted(bin_locations, inputs, eps=1e-6):
     bin_locations[..., -1] += eps
     return torch.sum(

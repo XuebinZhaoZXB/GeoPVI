@@ -8,49 +8,13 @@ from torch.autograd import Function
 import scipy
 import scipy.sparse as sparse
 import scipy.sparse.linalg as linalg
-from geopvi.vi.utils import *
+from geopvi.vi.utils import MaskedNN, MLP, CNN1D, unconstrained_RQS, TriangularSolve, functional_derivatives
 
 """
 The field of normalising flows is developing very fast, in this package 
 we just implemented several flows that are tested to be effective as of 2020 in our GJI paper.
 Feel free to add new flows that you think is useful!
 """
-
-# supported non-linearities: note that the function must be invertible
-functional_derivatives = {
-    torch.tanh: lambda x: 1 - torch.pow(torch.tanh(x), 2),
-    F.leaky_relu: lambda x: (x > 0).type(torch.FloatTensor) + \
-                            (x < 0).type(torch.FloatTensor) * -0.01,
-    F.elu: lambda x: (x > 0).type(torch.FloatTensor) + \
-                     (x < 0).type(torch.FloatTensor) * torch.exp(x)
-}
-
-class TriangularSolve(Function):
-    @staticmethod
-    def forward(ctx, input, L):
-        '''
-        Solve triangular system L*x = b for x given L and b
-        L is parametrised by structured kernel with sparse diagonals
-        this assumes dimensionality of L is high such that you can't solve the above problem using triangular_solve
-        therefore L is represented as scipy.sparse.diags object and solved using scipy.linalg.spsolve_triangular
-        input: input tensor b (nsampls * ndim)
-        L: a sparse lower triangular matrix with cov = L@LT
-        grad: gradient of output (x) w.r.t. input (b) (nsamples * ndim)
-        '''
-        epsilons = linalg.spsolve_triangular(L.tocsr(), input.detach().numpy().T, lower = True)
-        grad = linalg.spsolve_triangular(L.tocsr(), np.eye(L.shape[0]), lower = True)
-        ctx.save_for_backward(input, torch.tensor(grad))
-        return torch.tensor(logp)
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        '''
-        this function returns the gradient w.r.t the input tensor in the forward function
-        therefore, the return shape should be the same as the shape of input tensor
-        '''
-        input, grad = ctx.saved_tensors
-        grad_input = (grad_output @ grad)
-        return grad_input, None, None
 
 
 class Real2Constr(nn.Module):
