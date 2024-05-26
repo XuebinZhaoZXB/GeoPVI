@@ -156,7 +156,7 @@ class Constr2Real(nn.Module):
                         z - 2 * torch.log(1 + torch.exp(-z))).sum(axis = -1) 
         return x, log_det
 
-
+ 
 class Linear(nn.Module):
     """
     Pytorch implementation for a linear transform: z = u + Lx
