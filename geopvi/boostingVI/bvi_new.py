@@ -70,10 +70,10 @@ class GaussianComponent():
     def log_prob_gt(self, param, x):
         'Calculate the log probability value g_t for a given component parameter: param and samples x'
         if self.base == 'Uniform':
-            x, log_det = const_2_real(x, lower = 0, upper = 1)
+            x, lg1 = const_2_real(x, lower = 0, upper = 1)
             log_base = 0
         elif self.base == 'Normal':
-            log_det = torch.zeros(x.shape[0])
+            lg1 = torch.zeros(x.shape[0])
             log_base = -0.5 * self.dim * np.log(2*np.pi) - 0.5 * (x**2).sum(axis = 1)
 
         mu, std = param[:self.dim * 2].chunk(2)
@@ -85,24 +85,100 @@ class GaussianComponent():
             pass
         elif self.kernel == 'diagonal':
             x = mu + x * std
-        log_det += torch.log(std).sum().repeat(x.shape[0])
+        lg2 = torch.log(std).sum().repeat(x.shape[0])
 
-        lg = 0.
+        lg3 = 0.
         if self.constrained:
-            x, lg = real_2_const(x, lower = self.lower, upper = self.upper)
+            x, lg3 = real_2_const(x, lower = self.lower, upper = self.upper)
         
-        return x, log_base - (log_det + lg)
+        return x, log_base - (lg1 + lg2 + lg3)
 
-    def log_prob_qt_minus_one(self, param, m):
+    def log_prob_qt_minus_one(self, param, x):
         '''
         Calculate the log probability value q_t-1 using components parameter param from previous t-1 components
         and get the corresponding sample in base distribution
+        Essentially, this should be the inverse of the above log_prob_gt function
+        Input:
+            x:      samples in trule model space with shape: (nsamples, dim)
+            param:  parameters for obtained Gaussian components: g1, g2, ..., gt-1
+        Output:
+            x:      samples in base distribution with shape: (nsamples * ncomponents * dim)
+            lg:     log probability value for the input tensor evaluated under different components g1, ... gt-1
         '''
+        x = x[:, None, :]           # first add one dimension for different components
+        lg1 = 0.
+        if self.constrained:
+            x, lg1 = const_2_real(x, lower = self.lower, upper = self.upper)    # lg1: nsamples * 1
 
+        mu, std = param[:, :self.dim * 2].chunk(2, dim = -1)            # ncomponents * ndim
+        std = torch.log(torch.exp(std) + 1)
+        if self.kernel == 'fullrank':
+        # TODO kernel == 'fullrank' and kernel == 'structured'
+            pass
+        elif self.kernel == 'structured':
+            pass
+        elif self.kernel == 'diagonal':
+            x = (x - mu) / std                                          # nsamples * ncomponents * ndim
+        lg2 = - torch.log(std).sum(axis = -1).repeat(x.shape[0], 1)     # nsamples * ncomponents
 
-    def component_init(self, params, weights, perturb_std):
-        'Initialization Gaussian component with heuristics'
+        if self.base == 'Uniform':
+            x, lg3 = real_2_const(x, lower = 0, upper = 1)              # nsamples * ncomponents * ndim
+                                                                        # lg3: nsamples * ncomponents
+            log_base = 0
+        elif self.base == 'Normal':
+            lg3 = torch.zeros_like(lg2)
+            log_base = - 0.5 * self.dim * np.log(2*np.pi) - 0.5 * (x**2).sum(axis = -1)
+        
+        return x, log_base + lg1[:, None] + lg2 + lg3
 
+    def component_init(self, params, weights, perturb = 0.2):
+        '''
+        Initialization Gaussian component with heuristics
+        The mean vector is initialised by randomly perturbing the mean vector of one of previously obtained components
+        The first component is initialised as N(0, 1)
+        The std vector is initialised as 0
+        Input:
+            params: parameters for each component
+            weights: weights for each component
+            perturb: standard deviation of random perturbation
+        '''
+        params = self._atleast_2d(params)
+        i = params.shape[0]
+        if i == 0:
+            # Initialise the first component: ADVI initilisation
+            mu = torch.zeros(self.dim)
+            # std = log(exp(log_sigma) + 1)
+            log_sigma = torch.zeros(self.dim)
+            if self.kernel == 'fullrank':
+            # TODO kernel == 'fullrank' and kernel == 'structured'
+                non_diag = torch.zeros(int(self.dim*(self.dim - 1)/2))
+                new_param = torch.cat((mu, log_sigma, non_diag), dim=0)
+                pass
+            elif self.kernel == 'structured':
+                pass
+            elif self.kernel == 'diagonal':
+                new_param = torch.cat((mu, log_sigma), dim=0)
+        else:
+            # Initialise new components by randomly perturbing one of the previously obtained components
+            mus = params[:, :self.dim]
+            probs = ((weights) / (weights).sum()).detach().numpy()
+            k = np.random.choice(range(i), p=probs)
+            log_sigmas = params[:, self.dim : 2*self.dim]
+            mu = mus[k,:] + torch.randn(self.dim) * torch.log(1 + torch.exp(log_sigmas[k, :])) * perturb
+            # log_sigma = log_sigmas[k, :] + torch.randn(self.dim) * inflation
+            # log_sigma = torch.ones(self.dim)
+            log_sigma = torch.zeros(self.dim)
+
+            if self.kernel == 'fullrank':
+            # TODO kernel == 'fullrank' and kernel == 'structured'
+                non_diag = torch.zeros(int(self.dim*(self.dim - 1)/2))
+                new_param = torch.cat((mu, log_sigma, non_diag), dim=0)
+                pass
+            elif self.kernel == 'structured':
+                pass
+            elif self.kernel == 'diagonal':
+                new_param = torch.cat((mu, log_sigma), dim=0)
+        return new_param
 
 
 class boostingGaussian():
@@ -110,4 +186,4 @@ class boostingGaussian():
     A class that defines a variational distribution through boosting variational inference
     which essentially builds a mixture of distributions (e.g., Gaussians) to approximate the true posterior pdf
     '''
-    def __init__(self, flows, kernel = 'diagonal', mask = None, constrained = True):
+    def __init__(self, componentDistribution, log_posterior):
