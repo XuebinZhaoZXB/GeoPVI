@@ -49,7 +49,7 @@ class GaussianComponent():
     '''
     Define a Gaussian component distribution for boosting variational inference (BVI)
     '''
-    def __init__(self, dim, kernel = 'diagonal', mask = None, base = 'Normal', perturb = 0.5,
+    def __init__(self, dim, kernel = 'diagonal', mask = None, base = 'Normal', perturb = 1,
                         constrained = False, lower = None, upper = None):
         self.dim = dim
         self.perturb = perturb
@@ -65,15 +65,15 @@ class GaussianComponent():
                 raise ValueError('Constrained Gaussian component, at least one of the lower and upper bounds should not be None!')
             if upper is None:
                 self.upper = None
-            else
+            else:
                 if np.isscalar(upper):
-                    upper = np.full((dim,) upper)
+                    upper = np.full((dim,), upper)
                 self.upper = torch.from_numpy(upper)
             if lower is None:
                 self.lower = None
             else:
                 if np.isscalar(lower):
-                    lower = np.full((dim,) lower)
+                    lower = np.full((dim,), lower)
                 self.lower = torch.from_numpy(lower)
         if kernel == 'strucutred':
             if mask is None:
@@ -161,7 +161,7 @@ class GaussianComponent():
             lg:     log probability values for the input tensor evaluated under different components g1, ... gt-1
         '''
         x = x[:, None, :]           # first add one dimension for different components
-        lg1 = 0.
+        lg1 = torch.zeros(x.shape[:2])
         if self.constrained:
             x, lg1 = const_2_real(x, lower = self.lower, upper = self.upper)    # lg1: nsamples * 1
 
@@ -184,7 +184,7 @@ class GaussianComponent():
             lg3 = torch.zeros_like(lg2)
             log_base = - 0.5 * self.dim * np.log(2*np.pi) - 0.5 * (x**2).sum(axis = -1)
         
-        return x, log_base + lg1[:, None] + lg2 + lg3
+        return x, log_base + lg1 + lg2 + lg3
 
     def component_init(self, params, weights):
         '''
@@ -219,6 +219,7 @@ class GaussianComponent():
             probs = ((weights) / (weights).sum()).detach().numpy()
             k = np.random.choice(range(i), p=probs)
             log_sigmas = params[:, self.dim : 2*self.dim]
+            # mu = mus[k,:] + torch.randn(self.dim) * self.perturb
             mu = mus[k,:] + torch.randn(self.dim) * torch.log(1 + torch.exp(log_sigmas[k, :])) * self.perturb
             # log_sigma = log_sigmas[k, :] + torch.randn(self.dim) * inflation
             # log_sigma = torch.ones(self.dim)
@@ -251,17 +252,20 @@ class BoostingGaussian():
     '''
     def __init__(
         self, componentDistribution, log_posterior, lmb = lambda itr : 1, start_component = 0,
-        weight_cal = 0, weight_init = 'equal', lr_weight = 0.005, niter_weight = 100, nsample_weight = 1
+        weight_cal = 0, weight_init = 'equal'
     ):
         self.N = start_component # current num of components
         self.log_posterior = log_posterior
         self.component_dist = componentDistribution
         self.lmb = lmb
-        self.weight_cal = weight_cal
-        self.weight_init = weight_init
-        self.lr_w = lr_weight
-        self.niter_weight = niter_weight
-        self.nsample_weight = nsample_weight
+        if weight_cal == 0 or weight_cal == 1 or weight_cal == 2:
+            self.weight_cal = weight_cal
+        else:
+            raise Exception("Invalid weight update method")
+        if weight_init == 'decreasing' or weight_init == 'equal' or weight_init == 'increasing':
+            self.weight_init = weight_init
+        else:
+            raise Exception("Invalid weight initialization method")
 
         self.weights = torch.empty(0) # weights
         self.params = torch.empty((0, 0)) # components' parameters
@@ -487,11 +491,16 @@ class BoostingGaussian():
         return loss
             
             
-    def update(self, ncomponent, n_init = 1, n_iter = 1000, nsample = 10, n_out = 1, 
-                optimizer = 'torch.optim.Adam', lr = 0.001, verbose = False):
+    def update(self, ncomponent, n_iter = 1000, nsample = 10, lr = 0.001, optimizer = 'torch.optim.Adam', 
+                n_out = 1, n_init = 1, lr_weight = 0.005, niter_weight = 100, nsample_weight = 1, verbose = False
+                ):
         '''
         Update/build BVI up to n components
         '''
+        if self.weight_cal != 0:
+            self.lr_w = lr_weight
+            self.niter_weight = niter_weight
+            self.nsample_weight = nsample_weight
         # if self.N != 0:
         #     self._load_previous_results()
         for i_comp in range(self.N, ncomponent):
@@ -503,16 +512,16 @@ class BoostingGaussian():
 
             # Second, build (train) the next component
             if verbose:
-                print('----------------------------------------\n')
-                print("Optimizing component " + str(i_comp + 1) + "... \n")
+                print('----------------------------------------')
+                print("Optimizing component " + str(i_comp + 1) + "... ")
             current_param = x0.detach().requires_grad_()
             optim = eval(optimizer)([current_param], lr = lr)
-            loss = self._update_component_param(current_param, i_comp, optim, n_out = 1, n_iter = n_iter,
+            loss = self._update_component_param(current_param, i_comp, optim, n_out = n_out, n_iter = n_iter,
                                 nsample = nsample, verbose = verbose)
 
             new_param = current_param.detach()
             if verbose:
-                print("Optimization of component " + str(i + 1) + " complete\n")
+                print("Optimization of component " + str(i_comp + 1) + " complete\n")
             
             if self.params.shape[0] == 0:       # first component
                 self.params = new_param[None]   # make sure self.params is a 2-dim tensor
@@ -525,7 +534,7 @@ class BoostingGaussian():
             self.weights_prev = self.weights.clone()
             self.weights = self._compute_weights()
 
-            if verbose and self.weight_method != 0:
+            if verbose and self.weight_cal != 0:
                 print('Weight update complete...')
             
             if verbose:
@@ -533,14 +542,14 @@ class BoostingGaussian():
                 weights = output['weights'].detach().numpy()
                 mus = output['mus'].detach().numpy()
                 covariances = output['covariances'].detach().numpy()
-                np.savetxt(f'./output/BVI_weights.txt', weights)
-                np.savetxt(f'./output/BVI_mus.txt', mus)
-                np.savetxt(f'./output/BVI_covariances.txt', covariances)
-                np.savetxt(f'./output/BVI_loss_component{i_comp}.txt', loss)
+                # np.savetxt(f'./output/BVI_weights.txt', weights)
+                # np.savetxt(f'./output/BVI_mus.txt', mus)
+                # np.savetxt(f'./output/BVI_covariances.txt', covariances)
+                # np.savetxt(f'./output/BVI_loss_component{i_comp}.txt', loss)
 
 
         # update self.N to the new # components
-        self.N = N
+        self.N = ncomponent
 
         output = self._get_mixture()
         return output
