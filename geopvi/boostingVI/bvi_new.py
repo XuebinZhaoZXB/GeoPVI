@@ -492,7 +492,8 @@ class BoostingGaussian():
             
             
     def update(self, ncomponent, n_iter = 1000, nsample = 10, lr = 0.001, optimizer = 'torch.optim.Adam', 
-                n_out = 1, n_init = 1, lr_weight = 0.005, niter_weight = 100, nsample_weight = 1, verbose = False
+                n_out = 1, n_init = 1, lr_weight = 0.005, niter_weight = 100, nsample_weight = 1, 
+                verbose = False, save_path = None
                 ):
         '''
         Update/build BVI up to n components
@@ -537,15 +538,15 @@ class BoostingGaussian():
             if verbose and self.weight_cal != 0:
                 print('Weight update complete...')
             
-            if verbose:
+            if save_path is not None:
                 output = self._get_mixture()                
                 weights = output['weights'].detach().numpy()
                 mus = output['mus'].detach().numpy()
                 covariances = output['covariances'].detach().numpy()
-                # np.savetxt(f'./output/BVI_weights.txt', weights)
-                # np.savetxt(f'./output/BVI_mus.txt', mus)
-                # np.savetxt(f'./output/BVI_covariances.txt', covariances)
-                # np.savetxt(f'./output/BVI_loss_component{i_comp}.txt', loss)
+                np.savetxt(f'{save_path}/BVI_weights.txt', weights)
+                np.savetxt(f'{save_path}/BVI_mus.txt', mus)
+                np.savetxt(f'{save_path}/BVI_covariances.txt', covariances)
+                np.savetxt(f'{save_path}/BVI_loss_component{i_comp}.txt', loss)
 
 
         # update self.N to the new # components
