@@ -28,13 +28,13 @@ class Real2Constr(nn.Module):
             self.upper = None
         else:
             if np.isscalar(upper):
-                upper = np.full((dim,) upper)
+                upper = np.full((dim,), upper)
             self.upper = torch.from_numpy(upper)
         if lower is None:
             self.lower = None
         else:
             if np.isscalar(lower):
-                lower = np.full((dim,) lower)
+                lower = np.full((dim,), lower)
             self.lower = torch.from_numpy(lower)
 
     def forward(self, x, train = True):
@@ -80,13 +80,13 @@ class Constr2Real(nn.Module):
             self.upper = None
         else:
             if np.isscalar(upper):
-                upper = np.full((dim,) upper)
+                upper = np.full((dim,), upper)
             self.upper = torch.from_numpy(upper)
         if lower is None:
             self.lower = None
         else:
             if np.isscalar(lower):
-                lower = np.full((dim,) lower)
+                lower = np.full((dim,), lower)
             self.lower = torch.from_numpy(lower)
 
     def forward(self, x, train = True):
