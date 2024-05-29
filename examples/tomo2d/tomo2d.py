@@ -172,7 +172,7 @@ if __name__ == "__main__":
 
     # Perform variational inversion
     loss_his.extend(
-                    inversion.update(optimizer = optimizer, n_iter = args.iterations, nsample = args.nsample, 
+                    inversion.update(optimizer = 'torch.optim.Adam', lr = args.lr, n_iter = args.iterations, nsample = args.nsample, 
                             save_intermediate_result = args.save_intermediate_result, n_out = args.nout, verbose = True)
                     )
 
