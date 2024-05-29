@@ -538,6 +538,9 @@ class BoostingGaussian():
             if verbose and self.weight_cal != 0:
                 print('Weight update complete...')
             
+            # update self.N to the new # components
+            self.N = i_comp + 1
+
             if save_path is not None:
                 output = self._get_mixture()                
                 weights = output['weights'].detach().numpy()
@@ -547,10 +550,6 @@ class BoostingGaussian():
                 np.savetxt(f'{save_path}/BVI_mus.txt', mus)
                 np.savetxt(f'{save_path}/BVI_covariances.txt', covariances)
                 np.savetxt(f'{save_path}/BVI_loss_component{i_comp}.txt', loss)
-
-
-        # update self.N to the new # components
-        self.N = ncomponent
 
         output = self._get_mixture()
         return output
