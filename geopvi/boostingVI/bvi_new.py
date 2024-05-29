@@ -124,8 +124,9 @@ class GaussianComponent():
             lg1 = torch.zeros(x.shape[0])
             log_base = -0.5 * self.dim * np.log(2*np.pi) - 0.5 * (x**2).sum(axis = -1)
 
-        mu, std = param[:self.dim * 2].chunk(2)
-        std = torch.log(torch.exp(std) + 1)
+        mu = param[:self.dim]
+        # std = torch.exp(param[self.dim: 2*self.dim])
+        std = torch.log(torch.exp(param[self.dim: 2*self.dim]) + 1)
         non_diag = param[2 * self.dim : ]
         if self.kernel == 'fullrank':
             L = torch.diag(std) + self._create_lower_triangular(non_diag, self.dim, -1)
@@ -165,8 +166,9 @@ class GaussianComponent():
         if self.constrained:
             x, lg1 = const_2_real(x, lower = self.lower, upper = self.upper)    # lg1: nsamples * 1
 
-        mu, std = params[:, :self.dim * 2].chunk(2, dim = -1)            # ncomponents * ndim
-        std = torch.log(torch.exp(std) + 1)
+        mu = params[:, :self.dim]
+        # std = torch.exp(params[:, self.dim:2*self.dim])
+        std = torch.log(torch.exp(params[:, self.dim:2*self.dim]) + 1)
         if self.kernel == 'fullrank':
         # TODO kernel == 'fullrank' and kernel == 'structured'
             pass
@@ -184,7 +186,7 @@ class GaussianComponent():
             lg3 = torch.zeros_like(lg2)
             log_base = - 0.5 * self.dim * np.log(2*np.pi) - 0.5 * (x**2).sum(axis = -1)
         
-        return x, log_base + lg1 + lg2 + lg3
+        return x, log_base + (lg1 + lg2 + lg3)
 
     def component_init(self, params, weights):
         '''
@@ -221,6 +223,7 @@ class GaussianComponent():
             log_sigmas = params[:, self.dim : 2*self.dim]
             # mu = mus[k,:] + torch.randn(self.dim) * self.perturb
             mu = mus[k,:] + torch.randn(self.dim) * torch.log(1 + torch.exp(log_sigmas[k, :])) * self.perturb
+            # mu = mus[k,:] + torch.randn(self.dim) * torch.exp(log_sigmas[k, :]) * self.perturb
             # log_sigma = log_sigmas[k, :] + torch.randn(self.dim) * inflation
             # log_sigma = torch.ones(self.dim)
             log_sigma = torch.zeros(self.dim)
@@ -240,9 +243,15 @@ class GaussianComponent():
         # first d params are mu values
         mus = params[:, :self.dim]
         # following params define the covariance matrix
-        covariances = params[:, self.dim:]
-        covariances[:, :self.dim] = torch.log(torch.exp(covariances[:, :self.dim]) + 1)
-        return {"mus": mus, "covariances": covariances}
+        # covariances = params[:, self.dim:]
+        # covariances[:, :self.dim] = torch.exp(params[:, self.dim:2*self.dim])
+        # stds = torch.exp(params[:, self.dim:2*self.dim])
+        stds = torch.log(torch.exp(params[:, self.dim:2*self.dim]) + 1)
+        non_diags = params[:, 2 * self.dim:]
+        # covariance = torch.cat([torch.exp(params[:, self.dim:2*self.dim]), params[:, 2*self.dim:]], dim = 1)
+        if self.kernel != 'diagonal':
+            return {"mus": mus, "stds": stds, 'off_diags': non_diags}
+        return {"mus": mus, "stds": stds}
 
 
 class BoostingGaussian():
@@ -539,7 +548,7 @@ class BoostingGaussian():
                 print('Weight update complete...')
             
             # update self.N to the new # components
-            self.N = i_comp + 1
+            self.N += 1
 
             if save_path is not None:
                 output = self._get_mixture()                
@@ -553,3 +562,17 @@ class BoostingGaussian():
 
         output = self._get_mixture()
         return output
+    
+    def sample(self, nsamples):        
+        '''
+        Draw samples from the obtained mixture models
+        '''
+        samples = np.empty([0, self.component_dist.dim])
+        probs = (self.weights / self.weights.sum()).numpy()
+        k = np.random.choice(range(self.N), size = nsamples, p=probs)
+        for i in range(self.N):
+            nsamples_i = (k == i).sum()
+            samples_i = self.component_dist.sample_from_base(nsamples_i)
+            samples_i, _ = self.component_dist.log_prob_gt(self.params[i], samples_i)
+            samples = np.vstack([samples, samples_i.numpy()])
+        return samples
