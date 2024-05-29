@@ -161,3 +161,20 @@ class Normal():
             logp_smooth = Smoothing.apply(x, self.smooth_matrix)
             return logp + logp_smooth
         return logp
+
+class User_defined_prior():
+    '''
+    A class that defines user-defined prior distribution used for inversion
+    '''
+    def __init__(self):
+        pass
+
+    def log_prob(self, x):
+        '''
+        Calculate log prior probability value for samples x
+        The results should be back-propagated by PyTorch auto-grad engine.
+        For example:
+            logp = log_prob_of_prior_samples(x)
+        '''
+        pass
+        return logp
