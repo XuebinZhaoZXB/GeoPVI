@@ -78,7 +78,7 @@ class VariationalInversion():
         self.log_posterior = log_posterior
         self.variationalDistribution = variationalDistribution
 
-    def update(self, optimizer = None, lr = 0.001, n_iter = 1000, nsample = 10, n_out = 1, 
+    def update(self, optimizer = 'torch.optim.Adam', lr = 0.001, n_iter = 1000, nsample = 10, n_out = 1, 
                     verbose = False, save_intermediate_result = False):
         '''
         Update variational model by optimising the variational objective function
@@ -96,8 +96,9 @@ class VariationalInversion():
         loss = []
         output_interval = math.ceil(n_iter / n_out)
         # if no optimizer is provided, default is Adam optimizer
-        if optimizer is None:
-            optimizer = torch.optim.Adam(self.variationalDistribution.parameters(), lr = lr)
+        optim = eval(optimizer)(self.variationalDistribution.parameters(), lr = lr)
+        # if optimizer is None:
+        #     optimizer = torch.optim.Adam(self.variationalDistribution.parameters(), lr = lr)
         if verbose:
             print('----------------------------------------\n')
 
@@ -108,9 +109,9 @@ class VariationalInversion():
             logp = self.log_posterior(z)
 
             negative_elbo = -torch.mean(logp - logq) # mean: Expectation term using Monte Carlo
-            optimizer.zero_grad()
+            optim.zero_grad()
             negative_elbo.backward()
-            optimizer.step()
+            optim.step()
             loss.append(negative_elbo.data.numpy())
 
             if i % output_interval == 0 and verbose:
@@ -132,7 +133,7 @@ class VariationalInversion():
                     torch.save({
                                 'iteration': len(loss),
                                 'model_state_dict': self.variationalDistribution.state_dict(),
-                                'optimizer_state_dict': optimizer.state_dict(),
+                                'optimizer_state_dict': optim.state_dict(),
                                 'loss': loss,
                                 }, 'model_intermediate.pt')
                 
