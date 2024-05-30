@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-import torch.optim as optim
+# import torch.optim as optim
 import scipy.sparse as sparse
 
 import os
@@ -198,7 +198,7 @@ if __name__ == "__main__":
     # define VI class to perform inversion
     inversion = VariationalInversion(variationalDistribution = variational, log_posterior = posterior.log_prob)
 
-    optimizer = optim.Adam(variational.parameters(), lr = args.lr)
+    # optimizer = optim.Adam(variational.parameters(), lr = args.lr)
     print(f"Number of hyperparameters is: {sum(p.numel() for p in variational.parameters())}", )
     print(f'Optimising variational model for {args.iterations} iterations with {args.nsample} samples per iteration\n')
 
@@ -223,8 +223,8 @@ if __name__ == "__main__":
 
     # Perform variational inversion
     loss_his.extend(
-                    inversion.update(optimizer = optimizer, n_iter = args.iterations, nsample = args.nsample, n_out = args.nout, 
-                                verbose = args.verbose, save_intermediate_result = args.save_intermediate_result)
+                    inversion.update(optimizer = 'torch.optim.Adam', lr = args.lr, n_iter = args.iterations, nsample = args.nsample, 
+                                n_out = args.nout, verbose = args.verbose, save_intermediate_result = args.save_intermediate_result)
                     )
 
     param = get_flow_param(variational.flows[-2])

@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-import torch.optim as optim
+# import torch.optim as optim
 
 import os
 from pathlib import Path
@@ -149,7 +149,7 @@ if __name__ == "__main__":
     # define VI class to perform inversion
     inversion = VariationalInversion(variationalDistribution = variational, log_posterior = posterior.log_prob)
 
-    optimizer = optim.Adam(variational.parameters(), lr = args.lr)
+    # optimizer = optim.Adam(variational.parameters(), lr = args.lr)
     print(f"Number of hyperparameters is: {sum(p.numel() for p in variational.parameters())}", )
     print(f'Optimising variational model for {args.iterations} iterations with {args.nsample} samples per iteration\n')
 
