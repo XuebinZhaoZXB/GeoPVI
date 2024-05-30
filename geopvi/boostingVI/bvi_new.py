@@ -26,7 +26,7 @@ def real_2_const(x, lower = None, upper = None):
         log_det = x.sum(axis = -1)
     else:    
         z = lower + (upper - lower) / (1 + torch.exp(-x))
-        log_det = (torch.log(upper - lower) - x - 2 * torch.log(1 + torch.exp(-x))).sum(axis = -1)
+        log_det = (np.log(upper - lower) - x - 2 * torch.log(1 + torch.exp(-x))).sum(axis = -1)
     return z, log_det
     
 def const_2_real(x, lower = None, upper = None):
@@ -221,8 +221,8 @@ class GaussianComponent():
             probs = ((weights) / (weights).sum()).detach().numpy()
             k = np.random.choice(range(i), p=probs)
             log_sigmas = params[:, self.dim : 2*self.dim]
-            # mu = mus[k,:] + torch.randn(self.dim) * self.perturb
-            mu = mus[k,:] + torch.randn(self.dim) * torch.log(1 + torch.exp(log_sigmas[k, :])) * self.perturb
+            mu = mus[k,:] + torch.randn(self.dim) * self.perturb
+            # mu = mus[k,:] + torch.randn(self.dim) * torch.log(1 + torch.exp(log_sigmas[k, :])) * self.perturb
             # mu = mus[k,:] + torch.randn(self.dim) * torch.exp(log_sigmas[k, :]) * self.perturb
             # log_sigma = log_sigmas[k, :] + torch.randn(self.dim) * inflation
             # log_sigma = torch.ones(self.dim)
