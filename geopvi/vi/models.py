@@ -79,7 +79,7 @@ class VariationalInversion():
         self.variationalDistribution = variationalDistribution
 
     def update(self, optimizer = 'torch.optim.Adam', lr = 0.001, n_iter = 1000, nsample = 10, n_out = 1, 
-                    verbose = False, save_intermediate_result = False):
+                    verbose = False, save_intermediate_result = False, **kwargs):
         '''
         Update variational model by optimising the variational objective function
         Input
