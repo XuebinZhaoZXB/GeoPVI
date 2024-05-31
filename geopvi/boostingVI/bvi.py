@@ -260,7 +260,6 @@ class BoostingGaussian():
                 print('The elapsed time is: ', end-start)          
         return loss
             
-            
     def update(self, ncomponent, n_iter = 1000, nsample = 10, lr = 0.001, optimizer = 'torch.optim.Adam', 
                 n_out = 1, n_init = 1, lr_weight = 0.005, niter_weight = 100, nsample_weight = 1, 
                 verbose = False, save_path = None
@@ -324,14 +323,36 @@ class BoostingGaussian():
         output = self._get_mixture()
         return output
     
-    def sample(self, nsamples):        
+    def sample(self, nsamples, component = -1):        
         '''
-        Draw samples from the obtained mixture models
+        Sample from the obtained mixture models or specific components
+        Argument
+            nsmaples:   total number of samples to be drawn
+            component:  indicator stating samples are drawn from which component
+                        int or np.ndarray or list
+                        if int: -1 means sample from all components - that is sample from the BVI model
+                                otherwise should be in [0, self.N) means which component to be sampled 
+                                (0 means the 1st, 1 means 2nd, and so on)
+                        if np.ndarray / list: sample from listed components
+        Return
+            Posterior samples
         '''
+        if isinstance(component, numpy.ndarray) or isinstance(component, list)
+            sample_index = component
+        elif isinstance(component, int):
+            if component == -1:
+                sample_index = np.arange(self.N)
+            elif 0 <= component < self.N:
+                sample_index = [component]
+            else:
+                raise ValueError('Component should be a numpy.ndarray with integer elements or an integer from -1 to self.N - 1')
+        else:
+            raise ValueError('Component should be a numpy.ndarray with integer elements or an integer from -1 to self.N - 1')
+
         samples = np.empty([0, self.component_dist.dim])
-        probs = (self.weights / self.weights.sum()).numpy()
-        k = np.random.choice(range(self.N), size = nsamples, p=probs)
-        for i in range(self.N):
+        probs = (self.weights[sample_index] / self.weights[sample_index].sum()).numpy()
+        k = np.random.choice(sample_index, size = nsamples, p = probs)
+        for i in range(sample_index):
             nsamples_i = (k == i).sum()
             samples_i = self.component_dist.sample_from_base(nsamples_i)
             samples_i, _ = self.component_dist.log_prob_gt(self.params[i], samples_i)
