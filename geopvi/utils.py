@@ -35,7 +35,7 @@ def smooth_matrix_3D(nx, ny, nz, smoothx, smoothy, smoothz):
     L = sparse.vstack([Sx,Sy,Sz])
     return L
 
-def PSVI_mask(correlation, ndim, nx = 1, nz = 1):
+def PSVI_mask_2D(correlation, ndim, nx = 1, nz = 1):
     z, x = correlation.shape
     rank = (correlation != 0).sum() // 2
     # cz, cx: coordinate for central point of the mask
@@ -51,4 +51,23 @@ def PSVI_mask(correlation, ndim, nx = 1, nz = 1):
             # self.non_diag[i, -offset[i]:] = torch.zeros(offset[i])
             mask[i, -offset[i]:] = False
             i += 1
+    return mask
+
+def PSVI_mask_3D(correlation, ndim, nx = 1, ny = 1, nz = 1):
+    y, x, z = correlation.shape
+    rank = (correlation != 0).sum() // 2
+    cy = correlation.size // 2 // (x*z)
+    cx = correlation.size // 2 % (x*z) // z
+    cz = correlation.size // 2 % (x*z) % z
+    offset = np.zeros(rank, dtype = int)
+    mask = np.ones((rank, ndim), dtype = bool)
+    i = 0
+    for iy in range(y):
+        for ix in range(x):
+            for iz in range(z):
+                if correlation[iy, ix, iz] == 0 or iy*x*z + ix*z + iz >= (correlation.size)//2:
+                    continue
+                offset[i] = (cy - iy)*nx*nz + (cx - ix)*nz + (cz - iz)
+                mask[i, -offset[i]:] = False
+                i += 1
     return mask
