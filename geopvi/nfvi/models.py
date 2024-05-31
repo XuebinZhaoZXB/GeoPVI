@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 
 
-class VariationalDistribution(nn.Module):
+class FlowsBasedDistribution(nn.Module):
     '''
     A class that creates a variational model (distribution) which uses a set of invertible transforms (normalising flows)
     inherited from torch.nn.Module
