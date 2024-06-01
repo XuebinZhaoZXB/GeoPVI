@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
+from torch.autograd import Function
 
 
 DEFAULT_MIN_BIN_WIDTH = 1e-3
@@ -9,14 +10,6 @@ DEFAULT_MIN_BIN_HEIGHT = 1e-3
 DEFAULT_MIN_DERIVATIVE = 1e-3
 
 
-# supported non-linearities: note that the function must be invertible
-functional_derivatives = {
-    torch.tanh: lambda x: 1 - torch.pow(torch.tanh(x), 2),
-    F.leaky_relu: lambda x: (x > 0).type(torch.FloatTensor) + \
-                            (x < 0).type(torch.FloatTensor) * -0.01,
-    F.elu: lambda x: (x > 0).type(torch.FloatTensor) + \
-                     (x < 0).type(torch.FloatTensor) * torch.exp(x)
-}
 
 class TriangularSolve(Function):
     @staticmethod

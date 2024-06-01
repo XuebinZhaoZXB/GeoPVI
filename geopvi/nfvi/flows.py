@@ -4,17 +4,25 @@ import torch
 import torch.nn as nn
 import torch.nn.init as init
 import torch.nn.functional as F
-from torch.autograd import Function
-import scipy
 import scipy.sparse as sparse
 import scipy.sparse.linalg as linalg
-from geopvi.vi.utils import MaskedNN, MLP, CNN1D, unconstrained_RQS, TriangularSolve, functional_derivatives
+from geopvi.nfvi.utils import MaskedNN, MLP, CNN1D, unconstrained_RQS, TriangularSolve
 
 """
 The field of normalising flows is developing very fast, in this package 
 we just implemented several flows that are tested to be effective as of 2020 in our GJI paper.
 Feel free to add new flows that you think is useful!
 """
+
+
+# supported non-linearities: note that the function must be invertible
+functional_derivatives = {
+    torch.tanh: lambda x: 1 - torch.pow(torch.tanh(x), 2),
+    F.leaky_relu: lambda x: (x > 0).type(torch.FloatTensor) + \
+                            (x < 0).type(torch.FloatTensor) * -0.01,
+    F.elu: lambda x: (x > 0).type(torch.FloatTensor) + \
+                     (x < 0).type(torch.FloatTensor) * torch.exp(x)
+}
 
 
 class Real2Constr(nn.Module):
