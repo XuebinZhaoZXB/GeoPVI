@@ -235,7 +235,7 @@ class BoostingGaussian():
         '''
         Update parameter for one component distribution
         Input:
-            param: parameters need to be uupdated
+            param: parameters need to be updated
             optimizer: torch.optim object used to perform optimization
             component: which component being updated / component ID
             n_out: number of outputing intermediate training results for quality control
