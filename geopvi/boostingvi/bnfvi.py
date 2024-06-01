@@ -1,0 +1,360 @@
+import math
+import time
+import numpy as np 
+import torch
+
+
+def projection_on_simplex(x):
+    u = torch.sort(x, descending=True)[0]
+    indices = torch.arange(1, u.shape[0] + 1)
+    rho_nz = u + 1. / indices * (1. - torch.cumsum(u, dim=0)) > 0
+    rho = indices[rho_nz].max()
+    lmbda = 1. / rho * (1. - u[:rho].sum())
+    out = torch.max(
+        torch.stack([x + lmbda, torch.zeros_like(x, dtype=torch.float32)]), dim=0).values
+    return out / out.sum()
+    
+
+class BoostingGaussian():
+    '''
+    A class that defines a variational distribution through boosting variational inference
+    which essentially builds a mixture of distributions (e.g., Gaussians) to approximate the true posterior pdf
+    '''
+    def __init__(
+        self, componentDistribution, log_posterior, lmb = lambda itr : 1, start_component = 0,
+        weight_cal = 0, weight_init = 'equal'
+    ):
+        self.N = start_component # current num of components
+        self.log_posterior = log_posterior
+        self.component_dist = componentDistribution
+        self.lmb = lmb
+        if weight_cal == 0 or weight_cal == 1 or weight_cal == 2:
+            self.weight_cal = weight_cal
+        else:
+            raise Exception("Invalid weight update method")
+        if weight_init == 'decreasing' or weight_init == 'equal' or weight_init == 'increasing':
+            self.weight_init = weight_init
+        else:
+            raise Exception("Invalid weight initialization method")
+
+        self.weights = torch.empty(0) # weights
+        self.params = torch.empty((0, 0)) # components' parameters
+
+    def _init_one_weight(self, N):
+        if self.weight_init == 'decreasing':
+            weight = 0.75 / N
+        elif self.weight_init == 'equal':
+            weight = 1./N
+        elif self.weight_init == 'increasing':
+            weight = 1.25 / N
+        return weight
+
+    def _update_weight_0(self):
+        '''
+        Calculate weight coefficient with heuristics: decreasing, equal or increasing weights
+        '''
+        N = self.params.shape[0]
+        if N == 1:
+            return torch.tensor([1.])
+        
+        new_weight = self._init_one_weight(N)
+        return torch.cat([self.weights * (1 - new_weight), torch.tensor([new_weight])])
+
+    def _update_weight_1(self):
+        '''
+        Update weight coefficient for the new component only, using stochastic gradient descent - Guo et al., 2016
+        In our tests, we found that this update method is sometimes numerically unstable
+        and requires additional forward evaluations to perform gradient descent,
+        therefore, we don't recommend to use this method for weight update.
+        '''
+        N = self.params.shape[0]
+        if N == 1:
+            return torch.tensor([1.])
+
+        with torch.no_grad():
+            tolerance = 0.001
+            init_step_size = self.lr_w
+            new_weight = torch.tensor([self._init_one_weight(N)])
+
+            min_iters = 5
+            for i in range(self.niter_weight):
+                weights = torch.cat([self.weights * (1. - new_weight), new_weight])
+                gradient = self._weight_gradient(self.params, weights, self.nsample_weight)
+                step_size = init_step_size / (0.05 * i + 1)
+                w = min(max(new_weight - step_size * gradient, torch.tensor([0.0005])), torch.tensor([0.9995]))
+                dif = abs(new_weight - w)
+                new_weight = w
+                if i > min_iters and (dif < tolerance):
+                    break
+            return torch.cat([self.weights * (1. - new_weight), new_weight])
+
+    def _update_weight_2(self):
+        '''
+        Update weight coefficient for every component
+        In our tests, we found that this update method is sometimes numerically unstable
+        and requires additional forward evaluations to perform gradient descent,
+        therefore, we don't recommend to use this method for weight update.
+        '''
+        N = self.params.shape[0]
+        if N == 1:
+            return torch.tensor([1.])
+        
+        new_weight = torch.tensor([self._init_one_weight(N)])
+        weights = torch.cat([self.weights * (1. - new_weight), new_weight])
+        # weights = torch.ones(N)
+        # weights /= weights.sum()
+
+        for _ in range(self.niter_weight):
+            weights.requires_grad_()
+            optimizer = torch.optim.SGD([weights], lr=self.lr_w, weight_decay = 0.)
+            optimizer.zero_grad()
+            self._kl_estimate(self.params, weights, self.nsample_weight).backward()
+            optimizer.step()
+
+            weights = projection_on_simplex(weights.detach())
+        return weights
+
+    def _weight_gradient(self, params, weights, nsamples):
+        '''
+        TODO: need to recheck this function again
+        '''
+        out = 0.
+        for k in range(weights.shape[0]):
+            samples = self.component_dist.generate_samples_for_one_component(params[k, :], nsamples)
+            if self.constrained:
+                samples, _ = self.component_dist.log_pdf(params[k, :], samples)
+                _, lg = self.component_dist.log_pdf_prev(params, samples)
+            else:
+                lg = self.component_dist.log_pdf(params, samples)
+            if len(lg.shape) == 1:
+                lg = lg[:,None]
+             
+            lg = torch.logsumexp(lg[:, weights > 0] + torch.log(weights[weights > 0]), dim=1)
+
+            if self.constrained:
+                log_det = 0
+            else:
+                samples, log_det = self.component_dist.real_2_const(samples)
+            lf = self.logp(samples)
+            # out += weights[k] * (lg.mean() - lf.mean())
+
+            if k < (weights.shape[0] - 1):
+                out += self.weights[k] * ((lg - log_det).mean() - lf.mean())
+            else:
+                out = (lg - log_det).mean() - lf.mean() - out
+        return out
+
+    def _kl_estimate(self):
+        # TODO update his function to perform _update_weight_2
+        pass
+
+    def _compute_weights(self):
+        if self.weight_cal == 0:
+            return self._update_weight_0()
+        elif self.weight_cal == 1:
+            return self._update_weight_1()
+        elif self.weight_cal == 2:
+            return self._update_weight_2()
+        else:
+            raise Exception("Invalid weight update method")
+
+    def _get_mixture(self):
+        # get the unflattened params and weights
+        output = self.component_dist.unflatten(self.params)
+        output.update([('weights', self.weights)])
+        return output
+
+    def _objective(self, param, itr, nsamples):
+        '''
+        Objective function for training each component
+        Negative ELBO for the first component
+        Negative RELBO for later components
+        Input:
+            param: parameters for current component to be trained
+            itr: iteration number for components, used to calculate regularisation value lmb
+            nsamples: number of samples per iteration to calculate the objective function
+        Return:
+            ELBO for the first component or RELBO for later components
+        '''
+        # Draw samples from base distribution
+        samples = self.component_dist.sample_from_base(nsamples)
+        # First, forward pass of component distribution to get model samples and its probability value log_gt
+        samples, log_gt = self.component_dist.log_prob_gt(param, samples)
+        # Second, backward pass model samples through obtained components to get log_qt-1
+        if self.weights.shape[0] > 0:
+            # 1. backward pass to get log_gi i \in [0, t-1]
+            _, log_gi = self.component_dist.log_prob_qt_minus_one(self.params, samples)
+            # 2. mix each component to get log_qt-1 = logsumexp(log(wi) + log(gi))
+            if len(log_gi.shape) == 1:
+                # Need to add a dim such that first dim corresponds to samples, and second dim to components
+                log_gi = log_gi[:, None]
+            log_qt_minus_1 = log_gi[:, self.weights > 0] + torch.log(self.weights[self.weights > 0])
+            log_qt_minus_1 = torch.logsumexp(log_qt_minus_1, dim = -1)
+        else:
+            log_qt_minus_1 = 0.
+        
+        # Third, calculate log posterior probability values for model samples by performing forward evaluation
+        logp = self.log_posterior(samples)
+        return - torch.mean(logp - log_qt_minus_1 - self.lmb(itr) * log_gt)
+
+    def _initialize(self, itr, nsamples = 100, n_init = 1):
+        '''
+        Randomly initialize component parameters and evaluate negative (R)ELBO value
+        Retrive the best parameter set which provides the minimal negative (R)ELBO value 
+        Note that such an initialize requires many additional forward evaulations
+        therefore, we don't suggest to use this method in high-D seismic inversion problems
+        Alternatively, this method might be used for problems where dimensionality is low or where forward evaluation is cheap,
+        to provide good initial values for every new component
+        This function also provides fast initialize method by calling component_dist.component_init directly
+        To do this, you need to set n_init = 1
+        Input:
+            itr: which component distribution being initialised
+            nsamples: number of samples used to perform Monte Carlo integration to estimate negative (R)ELBO
+            n_init: number of random initialisation; if = 1, then no additional forward evaluation is performed
+        Output:
+            best_param: obtained initialize values for new component
+        '''
+        if n_init == 1:
+            best_param = self.component_dist.component_init(self.params, self.weights)
+        else:
+            best_param = None
+            best_objective = float('inf')
+            # try initializing several times
+            for n in range(n_init):
+                current_param = self.component_dist.component_init(self.params, self.weights)
+                current_objective = self._objective(current_param, itr, nsamples)
+                if current_objective < best_objective or best_param is None:
+                    best_param = current_param
+                    best_objective = current_objective
+            if best_param is None:
+                # if every single initialization had an infinite objective, just raise an error
+                raise ValueError
+        return best_param
+
+    def _update_component_param(self, param, component, optimizer, n_out = 1, n_iter = 1000, nsample = 10, verbose = False):
+        '''
+        Update parameter for one component distribution
+        Input:
+            param: parameters need to be uupdated
+            optimizer: torch.optim object used to perform optimization
+            component: which component being updated / component ID
+            n_out: number of outputing intermediate training results for quality control
+        Return:
+            loss: loss function value for each iteration
+            Note that param is updated during iterations thus no need to explicit return
+        '''
+        loss = []
+        output_interval = math.ceil(n_iter / n_out)
+        start = time.time()
+        for i in range(n_iter):
+            optimizer.zero_grad()
+            negative_obj = self._objective(param, component, nsample)
+            negative_obj.backward()
+            optimizer.step()
+            loss.append(negative_obj.data.numpy())
+
+            if (i % output_interval == 0 or i == n_iter - 1) and verbose:
+                iteration = i if i < n_iter - 1 else n_iter
+                end = time.time()
+                print(f'Iteration: {iteration:>5d}, \tLoss: {negative_obj.data.numpy():>5f}')
+                print('The elapsed time is: ', end-start)          
+        return loss
+            
+    def update(self, ncomponent, n_iter = 1000, nsample = 10, lr = 0.001, optimizer = 'torch.optim.Adam', 
+                n_out = 1, n_init = 1, lr_weight = 0.005, niter_weight = 100, nsample_weight = 1, 
+                verbose = False, save_path = None
+                ):
+        '''
+        Update/build BVI up to n components
+        '''
+        if self.weight_cal != 0:
+            self.lr_w = lr_weight
+            self.niter_weight = niter_weight
+            self.nsample_weight = nsample_weight
+        # if self.N != 0:
+        #     self._load_previous_results()
+        for i_comp in range(self.N, ncomponent):
+            # First, initialize the next component:
+            x0 = self._initialize(i_comp, n_init = n_init)
+            # if this is the first component, set the dimension of self.params
+            if self.params.size == 0:
+                self.params = torch.empty((0, x0.shape[0]))
+
+            # Second, build (train) the next component
+            if verbose:
+                print('----------------------------------------')
+                print("Optimizing component " + str(i_comp + 1) + "... ")
+            current_param = x0.detach().requires_grad_()
+            optim = eval(optimizer)([current_param], lr = lr)
+            loss = self._update_component_param(current_param, i_comp, optim, n_out = n_out, n_iter = n_iter,
+                                nsample = nsample, verbose = verbose)
+
+            new_param = current_param.detach()
+            if verbose:
+                print("Optimization of component " + str(i_comp + 1) + " complete\n")
+            
+            if self.params.shape[0] == 0:       # first component
+                self.params = new_param[None]   # make sure self.params is a 2-dim tensor
+            else:
+                self.params = torch.cat((self.params, new_param[None]), 0)
+        
+            # compute the new weights and add to the list
+            if verbose and self.weight_cal != 0:
+                print('Updating weights...')
+            self.weights_prev = self.weights.clone()
+            self.weights = self._compute_weights()
+
+            if verbose and self.weight_cal != 0:
+                print('Weight update complete...')
+            
+            # update self.N to the new # components
+            self.N += 1
+
+            if save_path is not None:
+                output = self._get_mixture()                
+                weights = output['weights'].detach().numpy()
+                mus = output['mus'].detach().numpy()
+                covariances = output['covariances'].detach().numpy()
+                np.savetxt(f'{save_path}/BVI_weights.txt', weights)
+                np.savetxt(f'{save_path}/BVI_mus.txt', mus)
+                np.savetxt(f'{save_path}/BVI_covariances.txt', covariances)
+                np.savetxt(f'{save_path}/BVI_loss_component{i_comp}.txt', loss)
+
+        output = self._get_mixture()
+        return output
+    
+    def sample(self, nsamples, component = -1):        
+        '''
+        Sample from the obtained mixture models or specific components
+        Argument
+            nsmaples:   total number of samples to be drawn
+            component:  indicator stating samples are drawn from which component
+                        int or np.ndarray or list
+                        if int: -1 means sample from all components - that is sample from the BVI model
+                                otherwise should be in [0, self.N) means which component to be sampled 
+                                (0 means the 1st, 1 means 2nd, and so on)
+                        if np.ndarray / list: sample from listed components
+        Return
+            Posterior samples
+        '''
+        if isinstance(component, numpy.ndarray) or isinstance(component, list)
+            sample_index = component
+        elif isinstance(component, int):
+            if component == -1:
+                sample_index = np.arange(self.N)
+            elif 0 <= component < self.N:
+                sample_index = [component]
+            else:
+                raise ValueError('Component should be a numpy.ndarray with integer elements or an integer from -1 to self.N - 1')
+        else:
+            raise ValueError('Component should be a numpy.ndarray with integer elements or an integer from -1 to self.N - 1')
+
+        samples = np.empty([0, self.component_dist.dim])
+        probs = (self.weights[sample_index] / self.weights[sample_index].sum()).numpy()
+        k = np.random.choice(sample_index, size = nsamples, p = probs)
+        for i in range(sample_index):
+            nsamples_i = (k == i).sum()
+            samples_i = self.component_dist.sample_from_base(nsamples_i)
+            samples_i, _ = self.component_dist.log_prob_gt(self.params[i], samples_i)
+            samples = np.vstack([samples, samples_i.numpy()])
+        return samples
