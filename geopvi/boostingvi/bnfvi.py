@@ -297,7 +297,7 @@ class BoostingFlows(nn.Module):
                 # output = self._get_mixture()                
                 # weights = output['weights'].detach().numpy()
                 np.savetxt(f'{save_path}/BVI_weights.txt', self.weights.detach().numpy())
-                torch.save(f'{save_path}/BVI_components.txt', self.params)
+                torch.save(f'{save_path}/BVI_components.pt', self.params)
                 np.savetxt(f'{save_path}/BVI_loss_component{i_comp}.txt', loss)
 
         output = self._get_mixture(losses)
