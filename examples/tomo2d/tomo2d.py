@@ -134,16 +134,16 @@ if __name__ == "__main__":
     # define flows model
     flow = eval(args.flow)
     # flows = [flow(dim = ndim, kernel = args.kernel) for _ in range(args.nflow)]
-    flows = [Linear(dim = ndim, param = np.hstack([np.zeros(ndim), np.full((ndim,), 1.6)]), trainable = False)]
-    # flows = []
+    # flows = [Linear(dim = ndim, param = np.hstack([np.zeros(ndim), np.full((ndim,), 1.6)]), trainable = False)]
+    flows = []
     for i in range(args.nflow):
         flows += [Permute(dim = ndim), flow(dim = ndim, K = 8, B = 3, hidden_dim = [64, 128])]
 
     # if the initial distribution of flow model is a Uniform distribution, 
     # then add a flow to transform from constrained to real space
     if args.ini_dist == 'Uniform':
-        flows.insert(0, Constr2Real(lower = 0, upper = 1))
-    flows.append(Real2Constr(lower = lower, upper = upper))
+        flows.insert(0, Constr2Real(dim = ndim, lower = 0, upper = 1))
+    flows.append(Real2Constr(dim = ndim, lower = lower, upper = upper))
     variational = VariationalDistribution(flows, base = args.ini_dist)
 
     # define VI class to perform inversion
