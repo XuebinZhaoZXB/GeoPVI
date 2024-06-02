@@ -338,21 +338,21 @@ class BoostingGaussian():
             Posterior samples
         '''
         if isinstance(component, numpy.ndarray) or isinstance(component, list)
-            sample_index = component
+            component_index = component
         elif isinstance(component, int):
             if component == -1:
-                sample_index = np.arange(self.N)
+                component_index = np.arange(self.N)
             elif 0 <= component < self.N:
-                sample_index = [component]
+                component_index = [component]
             else:
                 raise ValueError('Component should be a numpy.ndarray with integer elements or an integer from -1 to self.N - 1')
         else:
             raise ValueError('Component should be a numpy.ndarray with integer elements or an integer from -1 to self.N - 1')
 
         samples = np.empty([0, self.component_dist.dim])
-        probs = (self.weights[sample_index] / self.weights[sample_index].sum()).numpy()
-        k = np.random.choice(sample_index, size = nsamples, p = probs)
-        for i in range(sample_index):
+        probs = (self.weights[component_index] / self.weights[component_index].sum()).numpy()
+        k = np.random.choice(component_index, size = nsamples, p = probs)
+        for i in component_index:
             nsamples_i = (k == i).sum()
             samples_i = self.component_dist.sample_from_base(nsamples_i)
             samples_i, _ = self.component_dist.log_prob_gt(self.params[i], samples_i)
