@@ -26,7 +26,7 @@ class TriangularSolve(Function):
         epsilons = linalg.spsolve_triangular(L.tocsr(), input.detach().numpy().T, lower = True)
         grad = linalg.spsolve_triangular(L.tocsr(), np.eye(L.shape[0]), lower = True)
         ctx.save_for_backward(input, torch.tensor(grad))
-        return torch.tensor(logp)
+        return torch.tensor(epsilons.T)
 
     @staticmethod
     def backward(ctx, grad_output):
