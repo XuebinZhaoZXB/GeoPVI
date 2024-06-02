@@ -56,7 +56,8 @@ class FlowsBasedDistribution(nn.Module):
             z, ld = flow.inverse(z)
             log_det += ld
         x = z
-        return x, log_det
+        logq0 = self._log_prob_base(x)
+        return x, logq0 + log_det
  
     def sample(self, nsamples):
         self.eval()
