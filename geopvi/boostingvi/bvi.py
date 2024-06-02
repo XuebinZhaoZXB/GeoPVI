@@ -158,10 +158,12 @@ class BoostingGaussian():
         else:
             raise Exception("Invalid weight update method")
 
-    def _get_mixture(self):
+    def _get_mixture(self, loss = None):
         # get the unflattened params and weights
         output = self.component_dist.unflatten(self.params)
         output.update([('weights', self.weights)])
+        if loss is not None:
+            output.update([('losses', loss)])
         return output
 
     def _objective(self, param, itr, nsamples):
@@ -273,6 +275,7 @@ class BoostingGaussian():
             self.nsample_weight = nsample_weight
         # if self.N != 0:
         #     self._load_previous_results()
+        losses = np.empty([0, n_iter])
         for i_comp in range(self.N, ncomponent):
             # First, initialize the next component:
             x0 = self._initialize(i_comp, n_init = n_init)
@@ -288,6 +291,7 @@ class BoostingGaussian():
             optim = eval(optimizer)([current_param], lr = lr)
             loss = self._update_component_param(current_param, i_comp, optim, n_out = n_out, n_iter = n_iter,
                                 nsample = nsample, verbose = verbose)
+            losses = np.vstack([losses, loss])
 
             new_param = current_param.detach()
             if verbose:
@@ -320,7 +324,7 @@ class BoostingGaussian():
                 np.savetxt(f'{save_path}/BVI_covariances.txt', covariances)
                 np.savetxt(f'{save_path}/BVI_loss_component{i_comp}.txt', loss)
 
-        output = self._get_mixture()
+        output = self._get_mixture(losses)
         return output
     
     def sample(self, nsamples, component = -1):        
