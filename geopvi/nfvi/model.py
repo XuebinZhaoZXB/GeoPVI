@@ -59,9 +59,11 @@ class FlowsBasedDistribution(nn.Module):
         return x, log_det
  
     def sample(self, nsamples):
+        self.eval()
         x = self.sample_from_base(nsamples)
         for flow in self.flows:
             x, _ = flow.forward(x, train = False)
+        self.train()
         return x
 
 
