@@ -343,7 +343,7 @@ class BoostingGaussian():
         Return
             Posterior samples
         '''
-        if isinstance(component, numpy.ndarray) or isinstance(component, list)
+        if isinstance(component, np.ndarray) or isinstance(component, list):
             component_index = component
         elif isinstance(component, int):
             if component == -1:
@@ -362,7 +362,7 @@ class BoostingGaussian():
             nsamples_i = (k == i).sum()
             samples_i = self.component_dist.sample_from_base(nsamples_i)
             samples_i, _ = self.component_dist.log_prob_gt(self.params[i], samples_i)
-            samples = np.vstack([samples, samples_i.numpy()])
+            samples = np.vstack([samples, samples_i.data.numpy()])
         return samples
 
 
@@ -388,6 +388,7 @@ class BoostingFlows(nn.Module):
             weight_init: method to initialise each weight efficient
                 options: 'decreasing', 'equal' and 'increasing'
         '''
+        super().__init__()
         # get dimensionality of the inversion problem
         for flow in flows:
             if hasattr(flow, 'dim'):
@@ -626,8 +627,8 @@ class BoostingFlows(nn.Module):
             if verbose:
                 print("Optimization of component " + str(i_comp + 1) + " complete\n")
             
-            for p in current_param.parameters():
-                p.requires_grad_(False)
+            # for p in current_param.parameters():
+            #     p.requires_grad_(False)
             self.params.append(current_param)
         
             # compute the new weights and add to the list
@@ -666,7 +667,7 @@ class BoostingFlows(nn.Module):
         Return
             Posterior samples
         '''
-        if isinstance(component, numpy.ndarray) or isinstance(component, list)
+        if isinstance(component, np.ndarray) or isinstance(component, list):
             component_index = component
         elif isinstance(component, int):
             if component == -1:
@@ -684,5 +685,5 @@ class BoostingFlows(nn.Module):
         for i in component_index:
             nsamples_i = (k == i).sum()
             samples_i = self.params[i].sample(nsamples_i)
-            samples = np.vstack([samples, samples_i.numpy()])
+            samples = np.vstack([samples, samples_i.data.numpy()])
         return samples
