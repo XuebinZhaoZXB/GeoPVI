@@ -128,7 +128,7 @@ class Constr2Real(nn.Module):
                         z - 2 * torch.log(1 + torch.exp(-z))).sum(axis = -1) 
         return x, log_det
 
- 
+
 class Linear(nn.Module):
     """
     Pytorch implementation for a linear transform: z = u + Lx
@@ -222,6 +222,7 @@ class Linear(nn.Module):
     def inverse(self, z):
         diag = torch.exp(self.diag)
         if self.kernel == 'fullrank':
+            # TODO: whether use triangule solve or save inverse of L in advance to reduce computational cost
             b = (z - self.u).T
             L = torch.diag(diag) + self.create_lower_triangular(diagonal=-1)
             # For newer Pytorch version, torch.triangular_solve is deprecated 
@@ -231,6 +232,7 @@ class Linear(nn.Module):
         elif self.kernel == 'diagonal':
             x = (z - self.u) / diag
         elif self.kernel == 'structured':
+            # TODO: whether use triangule solve or save inverse of L in advance to reduce computational cost
             # Current torch version used doesn't support torch.sparse.spdiags
             # thus the inverse for this case is implemented using scipy.sparse.diags
             sparse_diagonals = torch.vstack([diag, self.non_diag]).detach().numpy()
@@ -386,7 +388,7 @@ class SIAF(nn.Module):
     def __init__(self, dim, hidden_dim = [8], base_network=MLP):
         """
         hidden_dim: a list defining NN parameters for the base network 
-                    used to define the 1-2-1 transform in the coupling layer
+                    used to define the 1-2-1 transform in the auto-regressive layer
         base_network: can be MLP (multiple layer perceptron) or CNN
         """
         super().__init__()
@@ -412,13 +414,11 @@ class SIAF(nn.Module):
             # z[:, i] = (x[:, i] - mu) / torch.exp(alpha)
             z[:, i] = x[:, i] * torch.exp(alpha) + mu
             log_det += alpha
-        z = z.flip(dims=(1,))
         return z, log_det
 
     def inverse(self, z):
         x = torch.zeros_like(z)
         log_det = torch.zeros(z.shape[0])
-        z = z.flip(dims=(1,))
         for i in range(self.dim):
             if i == 0:
                 mu, alpha = self.initial_param[0], self.initial_param[1]
@@ -475,7 +475,7 @@ class IAF(nn.Module):
         mu, alpha = out.split(self.dim, dim=1)
         z = x * torch.exp(alpha) + mu
         # reverse order, so if we stack MAFs correct things happen
-        z = z.flip(dims=(1,))
+        # z = z.flip(dims=(1,))
         log_det = torch.sum(alpha, dim=1)
         return z, log_det
     
@@ -483,7 +483,7 @@ class IAF(nn.Module):
         # we have to decode the x one at a time, sequentially
         x = torch.zeros_like(z)
         log_det = torch.zeros(z.shape[0])
-        z = z.flip(dims=(1,)) 
+        # z = z.flip(dims=(1,)) 
         for i in range(self.dim):
             out = self.net(x.clone()) # clone to avoid in-place op errors if using IAF
             mu, alpha = out.split(self.dim, dim=1)
@@ -521,7 +521,7 @@ class ReverseOrder(nn.Module):
     """
     def __init__(self, dim):
         super().__init__()
-        self.index = np.linspace(dim - 1,0, dim)
+        self.index = np.linspace(dim - 1,0, dim, dtype = 'int')
 
     def forward(self, x, train = True):
         z = x[:, self.index]
@@ -529,7 +529,8 @@ class ReverseOrder(nn.Module):
         return z, log_det
 
     def inverse(self, z):
-        x = z[:, np.argsort(self.index)]
+        # inverse transform is the same as forward transform
+        x = z[:, self.index]
         log_det = torch.zeros(x.shape[0])
         return x, log_det
 
@@ -596,13 +597,13 @@ class NSF_SAR(nn.Module):
             z[:, i], ld = unconstrained_RQS(
                 x[:, i], W, H, D, inverse=False, tail_bound=self.B)
             log_det += ld
-        z = z.flip(dims = (1,))
+        # z = z.flip(dims = (1,))
         return z, log_det
 
     def inverse(self, z):
         x = torch.zeros_like(z)
         log_det = torch.zeros(x.shape[0])
-        z = z.flip(dims=(1,))
+        # z = z.flip(dims=(1,))
         for i in range(self.dim):
             if i == 0:
                 init_param = self.init_param.expand(x.shape[0], 3 * self.K - 1)
@@ -671,14 +672,14 @@ class NSF_AR(nn.Module):
         z, ld = unconstrained_RQS(
             x, W, H, D, inverse=False, tail_bound=self.B)
         log_det += torch.sum(ld, dim = 1)
-        z = z.flip(dims=(1,))
+        # z = z.flip(dims=(1,))
         return z, log_det
 
     def inverse(self, z, train = False):
         # we have to decode the x one at a time, sequentially
         x = torch.zeros_like(z)
         log_det = torch.zeros(z.shape[0])
-        z = z.flip(dims=(1,)) 
+        # z = z.flip(dims=(1,)) 
         for i in range(self.dim):
             out = self.net(x.clone()).reshape(-1, self.dim, 3 * self.K - 1)
             W, H, D = torch.split(out, self.K, dim = 2)
