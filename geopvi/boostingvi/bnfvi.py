@@ -2,6 +2,8 @@ import math
 import time
 import numpy as np 
 import torch
+import torch.nn as nn
+from geopvi.nfvi.model import FlowsBasedDistribution
 
 
 def projection_on_simplex(x):
@@ -15,18 +17,38 @@ def projection_on_simplex(x):
     return out / out.sum()
     
 
-class BoostingGaussian():
+class BoostingFlows(nn.Module):
     '''
     A class that defines a variational distribution through boosting variational inference
-    which essentially builds a mixture of distributions (e.g., Gaussians) to approximate the true posterior pdf
+    which essentially builds a mixture of distributions to approximate the true posterior pdf
+    In this case, the component distribution is defined by a normalising flows model
     '''
     def __init__(
-        self, componentDistribution, log_posterior, lmb = lambda itr : 1, start_component = 0,
+        self, flows, log_posterior, base = 'Normal', lmb = lambda itr : 1, start_component = 0,
         weight_cal = 0, weight_init = 'equal'
     ):
+        '''
+        Parameter
+            flows: a list defining flows-based model for each component distribution in BVI
+            log_posterior: a function calculating the logarithmic posterior probability values for input models
+            base: base distribution for flows-based model (base distribution for component distribution)
+            lmb: a function calculating the regularisation term used in RELBO
+            start_component: which component to start with
+            weight_cal: method to calculate weight coefficient for each component
+                options: 0, 1, and 2; corresponding to each method in Zhao and Curtis JGR 2024 (BVI paper)
+            weight_init: method to initialise each weight efficient
+                options: 'decreasing', 'equal' and 'increasing'
+        '''
+        # get dimensionality of the inversion problem
+        for flow in flows:
+            if hasattr(flow, 'dim'):
+                self.dim = flow.dim
+                break
+
         self.N = start_component # current num of components
         self.log_posterior = log_posterior
-        self.component_dist = componentDistribution
+        self.flows = flows
+        self.base = base
         self.lmb = lmb
         if weight_cal == 0 or weight_cal == 1 or weight_cal == 2:
             self.weight_cal = weight_cal
@@ -38,7 +60,7 @@ class BoostingGaussian():
             raise Exception("Invalid weight initialization method")
 
         self.weights = torch.empty(0) # weights
-        self.params = torch.empty((0, 0)) # components' parameters
+        self.params = nn.ModuleList()
 
     def _init_one_weight(self, N):
         if self.weight_init == 'decreasing':
@@ -53,7 +75,7 @@ class BoostingGaussian():
         '''
         Calculate weight coefficient with heuristics: decreasing, equal or increasing weights
         '''
-        N = self.params.shape[0]
+        N = len(self.params)
         if N == 1:
             return torch.tensor([1.])
         
@@ -67,7 +89,7 @@ class BoostingGaussian():
         and requires additional forward evaluations to perform gradient descent,
         therefore, we don't recommend to use this method for weight update.
         '''
-        N = self.params.shape[0]
+        N = len(self.params)
         if N == 1:
             return torch.tensor([1.])
 
@@ -95,7 +117,7 @@ class BoostingGaussian():
         and requires additional forward evaluations to perform gradient descent,
         therefore, we don't recommend to use this method for weight update.
         '''
-        N = self.params.shape[0]
+        N = len(self.params)
         if N == 1:
             return torch.tensor([1.])
         
@@ -118,31 +140,7 @@ class BoostingGaussian():
         '''
         TODO: need to recheck this function again
         '''
-        out = 0.
-        for k in range(weights.shape[0]):
-            samples = self.component_dist.generate_samples_for_one_component(params[k, :], nsamples)
-            if self.constrained:
-                samples, _ = self.component_dist.log_pdf(params[k, :], samples)
-                _, lg = self.component_dist.log_pdf_prev(params, samples)
-            else:
-                lg = self.component_dist.log_pdf(params, samples)
-            if len(lg.shape) == 1:
-                lg = lg[:,None]
-             
-            lg = torch.logsumexp(lg[:, weights > 0] + torch.log(weights[weights > 0]), dim=1)
-
-            if self.constrained:
-                log_det = 0
-            else:
-                samples, log_det = self.component_dist.real_2_const(samples)
-            lf = self.logp(samples)
-            # out += weights[k] * (lg.mean() - lf.mean())
-
-            if k < (weights.shape[0] - 1):
-                out += self.weights[k] * ((lg - log_det).mean() - lf.mean())
-            else:
-                out = (lg - log_det).mean() - lf.mean() - out
-        return out
+        pass
 
     def _kl_estimate(self):
         # TODO update his function to perform _update_weight_2
@@ -158,32 +156,36 @@ class BoostingGaussian():
         else:
             raise Exception("Invalid weight update method")
 
-    def _get_mixture(self):
-        # get the unflattened params and weights
-        output = self.component_dist.unflatten(self.params)
-        output.update([('weights', self.weights)])
-        return output
+    def _get_mixture(self, loss = None):
+        if loss is None:
+            return {'weights': self.weights, 'components': self.params}
+        else:
+            return {'weights': self.weights, 'components': self.params, 'losses': loss}
 
-    def _objective(self, param, itr, nsamples):
+    def _objective(self, current_component, itr, nsamples):
         '''
         Objective function for training each component
         Negative ELBO for the first component
         Negative RELBO for later components
         Input:
-            param: parameters for current component to be trained
+            current_component: current_component to be trained
             itr: iteration number for components, used to calculate regularisation value lmb
             nsamples: number of samples per iteration to calculate the objective function
         Return:
             ELBO for the first component or RELBO for later components
         '''
         # Draw samples from base distribution
-        samples = self.component_dist.sample_from_base(nsamples)
+        samples = current_component.sample_from_base(nsamples)
         # First, forward pass of component distribution to get model samples and its probability value log_gt
-        samples, log_gt = self.component_dist.log_prob_gt(param, samples)
+        samples, log_gt = current_component(samples)
         # Second, backward pass model samples through obtained components to get log_qt-1
-        if self.weights.shape[0] > 0:
+        self.eval()     # set all other parameters as non-trainable parameters
+        n_component = self.weights.shape[0]
+        if n_component > 0:
             # 1. backward pass to get log_gi i \in [0, t-1]
-            _, log_gi = self.component_dist.log_prob_qt_minus_one(self.params, samples)
+            log_gi = torch.zeros([nsamples, n_component])
+            for i in range(n_component):
+                _, log_gi[:, i] = self.params[i].inverse(samples)
             # 2. mix each component to get log_qt-1 = logsumexp(log(wi) + log(gi))
             if len(log_gi.shape) == 1:
                 # Need to add a dim such that first dim corresponds to samples, and second dim to components
@@ -192,7 +194,8 @@ class BoostingGaussian():
             log_qt_minus_1 = torch.logsumexp(log_qt_minus_1, dim = -1)
         else:
             log_qt_minus_1 = 0.
-        
+        self.train()
+
         # Third, calculate log posterior probability values for model samples by performing forward evaluation
         logp = self.log_posterior(samples)
         return - torch.mean(logp - log_qt_minus_1 - self.lmb(itr) * log_gt)
@@ -214,28 +217,13 @@ class BoostingGaussian():
         Output:
             best_param: obtained initialize values for new component
         '''
-        if n_init == 1:
-            best_param = self.component_dist.component_init(self.params, self.weights)
-        else:
-            best_param = None
-            best_objective = float('inf')
-            # try initializing several times
-            for n in range(n_init):
-                current_param = self.component_dist.component_init(self.params, self.weights)
-                current_objective = self._objective(current_param, itr, nsamples)
-                if current_objective < best_objective or best_param is None:
-                    best_param = current_param
-                    best_objective = current_objective
-            if best_param is None:
-                # if every single initialization had an infinite objective, just raise an error
-                raise ValueError
-        return best_param
+        pass
 
     def _update_component_param(self, param, component, optimizer, n_out = 1, n_iter = 1000, nsample = 10, verbose = False):
         '''
         Update parameter for one component distribution
         Input:
-            param: parameters need to be uupdated
+            param: parameters need to be updated
             optimizer: torch.optim object used to perform optimization
             component: which component being updated / component ID
             n_out: number of outputing intermediate training results for quality control
@@ -273,30 +261,25 @@ class BoostingGaussian():
             self.nsample_weight = nsample_weight
         # if self.N != 0:
         #     self._load_previous_results()
+        losses = np.empty([0, n_iter])
         for i_comp in range(self.N, ncomponent):
             # First, initialize the next component:
-            x0 = self._initialize(i_comp, n_init = n_init)
-            # if this is the first component, set the dimension of self.params
-            if self.params.size == 0:
-                self.params = torch.empty((0, x0.shape[0]))
-
+            current_param = FlowsBasedDistribution(self.flows, base = self.base)
             # Second, build (train) the next component
             if verbose:
                 print('----------------------------------------')
                 print("Optimizing component " + str(i_comp + 1) + "... ")
-            current_param = x0.detach().requires_grad_()
-            optim = eval(optimizer)([current_param], lr = lr)
+            optim = eval(optimizer)(current_param.parameters(), lr = lr)
             loss = self._update_component_param(current_param, i_comp, optim, n_out = n_out, n_iter = n_iter,
                                 nsample = nsample, verbose = verbose)
+            losses = np.vstack([losses, loss])
 
-            new_param = current_param.detach()
             if verbose:
                 print("Optimization of component " + str(i_comp + 1) + " complete\n")
             
-            if self.params.shape[0] == 0:       # first component
-                self.params = new_param[None]   # make sure self.params is a 2-dim tensor
-            else:
-                self.params = torch.cat((self.params, new_param[None]), 0)
+            for p in current_param.parameters():
+                p.requires_grad_(False)
+            self.params.append(current_param)
         
             # compute the new weights and add to the list
             if verbose and self.weight_cal != 0:
@@ -311,16 +294,13 @@ class BoostingGaussian():
             self.N += 1
 
             if save_path is not None:
-                output = self._get_mixture()                
-                weights = output['weights'].detach().numpy()
-                mus = output['mus'].detach().numpy()
-                covariances = output['covariances'].detach().numpy()
-                np.savetxt(f'{save_path}/BVI_weights.txt', weights)
-                np.savetxt(f'{save_path}/BVI_mus.txt', mus)
-                np.savetxt(f'{save_path}/BVI_covariances.txt', covariances)
+                # output = self._get_mixture()                
+                # weights = output['weights'].detach().numpy()
+                np.savetxt(f'{save_path}/BVI_weights.txt', self.weights.detach().numpy())
+                torch.save(f'{save_path}/BVI_components.txt', self.params)
                 np.savetxt(f'{save_path}/BVI_loss_component{i_comp}.txt', loss)
 
-        output = self._get_mixture()
+        output = self._get_mixture(losses)
         return output
     
     def sample(self, nsamples, component = -1):        
@@ -338,23 +318,22 @@ class BoostingGaussian():
             Posterior samples
         '''
         if isinstance(component, numpy.ndarray) or isinstance(component, list)
-            sample_index = component
+            component_index = component
         elif isinstance(component, int):
             if component == -1:
-                sample_index = np.arange(self.N)
+                component_index = np.arange(self.N)
             elif 0 <= component < self.N:
-                sample_index = [component]
+                component_index = [component]
             else:
                 raise ValueError('Component should be a numpy.ndarray with integer elements or an integer from -1 to self.N - 1')
         else:
             raise ValueError('Component should be a numpy.ndarray with integer elements or an integer from -1 to self.N - 1')
 
-        samples = np.empty([0, self.component_dist.dim])
-        probs = (self.weights[sample_index] / self.weights[sample_index].sum()).numpy()
-        k = np.random.choice(sample_index, size = nsamples, p = probs)
-        for i in range(sample_index):
+        samples = np.empty([0, self.dim])
+        probs = (self.weights[component_index] / self.weights[component_index].sum()).numpy()
+        k = np.random.choice(component_index, size = nsamples, p = probs)
+        for i in component_index:
             nsamples_i = (k == i).sum()
-            samples_i = self.component_dist.sample_from_base(nsamples_i)
-            samples_i, _ = self.component_dist.log_prob_gt(self.params[i], samples_i)
+            samples_i = self.params[i].sample(nsamples_i)
             samples = np.vstack([samples, samples_i.numpy()])
         return samples
