@@ -17,7 +17,7 @@ geopvi/prior_vpr.py
 **/*tdwi*
 
 # some .npy files (data or input parameters)
-*.npy
+**/fwi3d_bp/**/*.npy
 *.log
 
 
