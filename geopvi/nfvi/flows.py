@@ -378,6 +378,40 @@ class RealNVP(nn.Module):
         
         return torch.cat([z0, z1], dim = 1), log_det
 
+    # def forward(self, x, train = True):
+    #     # z = torch.zeros_like(x)
+    #     # x0, x1 = x[:,::2], x[:,1::2]
+    #     x0, x1 = x.chunk(2, dim = 1)
+    #     t0_transformed = self.t0(x0)
+    #     s0_transformed = torch.log(torch.exp(self.s0(x0)) + 1)
+    #     x1 = t0_transformed + x1 * s0_transformed
+    #     # x1 = (x1 - t0_transformed) / s0_transformed
+    #     t1_transformed = self.t1(x1)
+    #     s1_transformed = torch.log(torch.exp(self.s1(x1)) + 1)
+    #     x0 = t1_transformed + x0 * s1_transformed
+    #     # x0 = (x0 - t1_transformed) / s1_transformed
+    #     log_det = torch.sum(torch.log(s0_transformed), dim=1) + \
+    #               torch.sum(torch.log(s1_transformed), dim=1)
+
+    #     return torch.cat([x0, x1], dim = 1), log_det
+
+    # def inverse(self, z):
+    #     # x = torch.zeros_like(z)
+    #     # z0, z1 = z[:,::2], z[:,1::2]
+    #     z0, z1 = z.chunk(2, dim = 1)
+    #     t1_transformed = self.t1(z1)
+    #     s1_transformed = torch.log(torch.exp(self.s1(z1)) + 1)
+    #     z0 = (z0 - t1_transformed) / s1_transformed
+    #     # z0 = t1_transformed + z0 * s1_transformed
+    #     t0_transformed = self.t0(z0)
+    #     s0_transformed = torch.log(torch.exp(self.s0(z0)) + 1)
+    #     z1 = (z1 - t0_transformed) / s0_transformed
+    #     # z1 = t0_transformed + z1 * s0_transformed
+    #     log_det = torch.sum(-torch.log(s0_transformed), dim=1) + \
+    #               torch.sum(-torch.log(s1_transformed), dim=1)
+        
+    #     return torch.cat([z0, z1], dim = 1), log_det
+
 
 class SIAF(nn.Module):
     """
