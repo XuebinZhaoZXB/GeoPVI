@@ -65,10 +65,12 @@ def prepare_fwi_parameters(paramfile, config):
 
 
 class Posterior():
-    def __init__(self, data, args, config, log_prior = None, mask = None):
+    def __init__(self, data, config, vel_fixed = 1950, sigma = 0.1, num_processes = 1, 
+                            log_prior = None, mask = None, paramfile = 'input_params.txt'):
         '''
-        args: a python parser.parse_args() object that defines hyperparameters for VI
         data: observed data with shape: (ns*nt*nr,)
+        config: configure file used to define nuisance parameters for 2D fwi code
+        vel_fixed: velocity value for fixed (normally water layer) regions
         log_prior: a function that takes samples as input and calculates their log-prior values (using PyTorch)
                     Return: y = log_prior(x)
         mask: a mask array where the parameters with mask = 0 will be fixed 
@@ -76,14 +78,13 @@ class Posterior():
         num_processes: number of process for parallelisation
         paramfile: filename (and full path) that defines parameters for 2D FWI
         '''
-        # self.args = args
         self.data = data
         self.mask = mask
         self.log_prior = log_prior
-        self.num_processes = args.prcs
-        self.sigma = args.sigma
-        self.vel_water = config.getfloat('FWI','vel_fixed')
-        self.paramfile = args.basepath + 'input/input_params.txt'
+        self.num_processes = num_processes
+        self.sigma = sigma
+        self.vel_water = vel_fixed
+        self.paramfile = paramfile
         # create mask matrix for model parameters that are fixed during inversion (e.g., water layer)
         if mask is None:
             nx = config.getint('FWI','nx')

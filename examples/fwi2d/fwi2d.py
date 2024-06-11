@@ -10,8 +10,8 @@ import configparser
 import time
 from datetime import datetime
 
-from geopvi.vi.models import VariationalDistribution, VariationalInversion
-from geopvi.vi.flows import *
+from geopvi.nfvi.models import FlowsBasedDistribution, VariationalInversion
+from geopvi.nfvi.flows import Real2Constr, Constr2Real, Linear
 from geopvi.forward.fwi2d.posterior import Posterior 
 from geopvi.prior import Uniform, Normal
 from geopvi.utils import smooth_matrix_2D as smooth_matrix
@@ -52,31 +52,29 @@ if __name__ == "__main__":
     argparser.add_argument("--basepath", metavar='basepath', type=str, help='Project path',
                             default='/lustre03/other/2029iw/study/00_GeoPVI/examples/fwi2d/')
 
-    argparser.add_argument("--flow", default='Linear', type=str)
-    argparser.add_argument("--kernel", default='structured', type=str)
-    argparser.add_argument("--kernel_size", default=5, type=int)
-    argparser.add_argument("--nflow", default=1, type=int)
-    argparser.add_argument("--nsample", default=2, type=int)
-    argparser.add_argument("--prcs", default=2, type=int)
-    argparser.add_argument("--iterations", default=5000, type=int)
-    argparser.add_argument("--lr", default=0.001, type=float)
-    argparser.add_argument("--ini_dist", default='Normal', type=str)
-    argparser.add_argument("--sigma", default=0.1, type=float)
+    argparser.add_argument("--flow", default='Linear', type=str, help='Flows used to perform inversion')
+    argparser.add_argument("--kernel", default='structured', type=str, help='Covariance kernel type if Linear flow is used')
+    argparser.add_argument("--kernel_size", default=5, type=int, help='Local covariance kernel size if PSVI is performed')
+    argparser.add_argument("--nflow", default=1, type=int, help='number of flows')
+    argparser.add_argument("--nsample", default=2, type=int, help='number of samples for MC integration during each iteration')
+    argparser.add_argument("--prcs", default=2, type=int, help='number of processes in parallel to perform forward evaluation')
+    argparser.add_argument("--iterations", default=100, type=int, help='number of iterations to update variational parameters')
+    argparser.add_argument("--lr", default=0.005, type=float, help='learning rate')
+    argparser.add_argument("--ini_dist", default='Normal', type=str, help='initial (base) distribution for flows-based model')
+    argparser.add_argument("--sigma", default=0.1, type=float, help='data noise level')
 
-    argparser.add_argument("--smooth", default=False, type=bool)
-    argparser.add_argument("--smoothx", default=500, type=float)
-    argparser.add_argument("--smoothz", default=500, type=float)
+    argparser.add_argument("--smooth", default=False, type=bool, help='Whether to apply smooth factor on model vector m')
+    argparser.add_argument("--smoothx", default=500, type=float, help='Smoothness parameter, smaller value means stronger smoothness')
+    argparser.add_argument("--smoothz", default=500, type=float, help='Smoothness parameter, smaller value means stronger smoothness')
 
-    argparser.add_argument("--prior_type", default='Uniform', type=str)
-    argparser.add_argument("--prior_param", default='prior.txt', type=str)
-    argparser.add_argument("--fwi_config", metavar='fwi_config', default='config.ini', type=str)
-    argparser.add_argument("--datafile", metavar='data_obs', default='waveform.npy', type=str)
-    argparser.add_argument("--flow_init_name", type=str, default='none', 
-                                help='Parameter filename for flow initial value')
-    argparser.add_argument("--outdir", type=str, default='output/', 
-                                help='Folder for inversion results')
+    argparser.add_argument("--prior_type", default='Uniform', type=str, help='Prior pdf - either Uniform or Normal, or user-defined')
+    argparser.add_argument("--prior_param", default='prior.txt', type=str, help='filename containing hyperparametes to define prior pdf')
+    argparser.add_argument("--fwi_config", default='config.ini', type=str, help='filename containing parameters for forward simulation')
+    argparser.add_argument("--datafile", default='waveform.npy', type=str, help='filename for observed dataset')
+    argparser.add_argument("--flow_init_name", type=str, default='none', help='Parameter filename for flow initial value')
+    argparser.add_argument("--outdir", type=str, default='output/test/', help='folder path (relative to basepath) for output files')
 
-    argparser.add_argument("--verbose", default=True, type=bool, help='Output intermediate results')
+    argparser.add_argument("--verbose", default=True, type=bool, help='Output and print intermediate inversion results')
     argparser.add_argument("--save_intermediate_result", default=True, type=bool,
                                 help='Whether save intermediate training model, for resume from previous training')
     argparser.add_argument("--resume", default=False, type=bool, help='Resume previous training')
@@ -149,17 +147,18 @@ if __name__ == "__main__":
     # define Prior and Posterior pdf
     if args.prior_type == 'Uniform':
         prior = Uniform(lower = lower, upper = upper, smooth_matrix = L)
-    # elif args.prior_type == 'Normal':
+    elif args.prior_type == 'Normal':
         # This requires to have a loc (mean) vector and one parameter for covariance
-        # prior = Normal()
+        prior = Normal(loc = lower, std = upper)
     else:
         raise NotImplementedError("Not supported Prior distribution")
     print(f'Prior distribution is: {args.prior_type}')
-    posterior = Posterior(data_obs, args, config, log_prior = prior.log_prob, mask = mask.flatten())
+    posterior = Posterior(data_obs, config, vel_fixed = config.getfloat('FWI','vel_fixed'), sigma = args.sigma, num_processes = args.prcs, 
+                            log_prior = prior.log_prob, mask = mask.flatten(), paramfile = args.basepath + 'input/input_params.txt')
 
     # define flows model
     flow = eval(args.flow)
-    param = None    
+    param = None
     if args.flow_init_name != 'none':
         # load initial value for flows
         filename = os.path.join(args.basepath, 'input/', args.flow_init_name)
@@ -174,9 +173,9 @@ if __name__ == "__main__":
     # if the initial distribution of flow model is a Uniform distribution, 
     # then add a flow to transform from constrained to real space
     if args.ini_dist == 'Uniform':
-        flows.insert(0, Constr2Real(lower = 0, upper = 1))
-    flows.append(Real2Constr(lower = lower, upper = upper))
-    variational = VariationalDistribution(flows, base = args.ini_dist)
+        flows.insert(0, Constr2Real(dim = ndim, lower = 0, upper = 1))
+    flows.append(Real2Constr(dim = ndim, lower = lower, upper = upper))
+    variational = FlowsBasedDistribution(flows, base = args.ini_dist)
 
     # define VI class to perform inversion
     inversion = VariationalInversion(variationalDistribution = variational, log_posterior = posterior.log_prob)
@@ -197,7 +196,8 @@ if __name__ == "__main__":
             print('Invalid name for model checkpoint!')
         start_ite = checkpoint['iteration']
         variational.load_state_dict(checkpoint['model_state_dict'])
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        if 'optimizer_state_dict' in checkpoint.keys():
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         loss_his = checkpoint['loss']
         print(f'Resume training from previous run at iteration {start_ite:4d}\n')
     else:
@@ -208,6 +208,11 @@ if __name__ == "__main__":
                     inversion.update(optimizer = 'torch.optim.Adam', lr = args.lr, n_iter = args.iterations, nsample = args.nsample, 
                                 n_out = args.nout, verbose = args.verbose, save_intermediate_result = args.save_intermediate_result)
                     )
+
+    variational.eval()
+    samples = variational.sample(2000).data.numpy()
+    name = os.path.join(args.basepath, args.outdir, f'{args.flow}_{args.kernel}_samples.npy')
+    np.save(name, samples)
 
     param = get_flow_param(variational.flows[-2])
     name = os.path.join(args.basepath, args.outdir, f'{args.flow}_{args.kernel}_parameter.npy')
@@ -220,6 +225,5 @@ if __name__ == "__main__":
     torch.save({
                 'iteration': (len(loss_his)),
                 'model_state_dict': variational.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
                 'loss': loss_his,
                 }, name)
