@@ -87,6 +87,7 @@ class VariationalInversion():
         Update variational model by optimising the variational objective function
         Input
             optimizer: torch.optim used to perform optimization; default is torch.optim.Adam
+                        otherwise, can also be a string defining a torch.optim.optimizer
             lr: learning rate, default is 0.001
             n_iter: number of iterations
             nsample: number of samples per iteration to perform Monte Carlo integration
@@ -99,7 +100,10 @@ class VariationalInversion():
         loss = []
         output_interval = math.ceil(n_iter / n_out)
         # if no optimizer is provided, default is Adam optimizer
-        optim = eval(optimizer)(self.variationalDistribution.parameters(), lr = lr)
+        if isinstance(optimizer, str):
+            optim = eval(optimizer)(self.variationalDistribution.parameters(), lr = lr)
+        else:
+            optim = optimizer
         # if optimizer is None:
         #     optimizer = torch.optim.Adam(self.variationalDistribution.parameters(), lr = lr)
         if verbose:
