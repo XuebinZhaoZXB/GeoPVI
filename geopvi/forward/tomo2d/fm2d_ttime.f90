@@ -62,8 +62,8 @@ REAL(KIND=i10), DIMENSION (2,2) :: vss
 ! source lies on the edge or corner (a node) of the cell, then
 ! this scheme still applies.
 !
-isx=INT((scx-gox)/dnx)+1
-isz=INT((scz-goz)/dnz)+1
+isx=floor((scx-gox)/dnx)+1
+isz=floor((scz-goz)/dnz)+1
 sw=0
 IF(isx.lt.1.or.isx.gt.nnx)sw=1
 IF(isz.lt.1.or.isz.gt.nnz)sw=1
@@ -120,6 +120,7 @@ ELSE
    DO i=1,2
       DO j=1,2
          ds=SQRT((dsx-(i-1)*dnx)**2+(dsz-(j-1)*dnz)**2)
+         if(earth>0) ds=SQRT(((dsx-(i-1)*dnx)*earth)**2+((dsz-(j-1)*dnz)*earth*sin(scx))**2)
          ttn(isz-1+j,isx-1+i)=2.0*ds/(vss(i,j)+vsrc)
          CALL addtree(isz-1+j,isx-1+i)
       ENDDO
@@ -274,6 +275,10 @@ tsw1=0
 slown=1.0/veln(iz,ix)
 ri=earth
 risti=ri*sin(gox+(ix-1)*dnx)
+if(abs(earth)<1e-6)then
+   ri = 1
+   risti = 1
+endif
 DO j=ix-1,ix+1,2
    DO k=iz-1,iz+1,2 
       IF(j.GE.1.AND.j.LE.nnx)THEN
@@ -286,10 +291,8 @@ DO j=ix-1,ix+1,2
             IF(nsts(iz,j).EQ.0)THEN
                swsol=1
                IF(nsts(k,ix).EQ.0)THEN
-                  !u=ri*dnx
-                  !v=risti*dnz
-                  u = dnx
-                  v = dnz
+                  u=ri*dnx
+                  v=risti*dnz
                   em=ttn(k,ix)-ttn(iz,j)
                   a=u**2+v**2
                   b=-2.0*u**2*em
@@ -298,16 +301,16 @@ DO j=ix-1,ix+1,2
                ELSE
                   a=1.0
                   b=0.0
-                  !c=-slown**2*ri**2*dnx**2
-                  c=-slown**2*dnx**2
+                  c=-slown**2*ri**2*dnx**2
+                  !c=-slown**2*dnx**2
                   tref=ttn(iz,j)
                ENDIF
             ELSE IF(nsts(k,ix).EQ.0)THEN
                swsol=1
                a=1.0
                b=0.0
-               !c=-(slown*risti*dnz)**2
-               c=-(slown*dnz)**2
+               c=-(slown*risti*dnz)**2
+               !c=-(slown*dnz)**2
                tref=ttn(k,ix)
             ENDIF
 !
@@ -315,15 +318,16 @@ DO j=ix-1,ix+1,2
 !
             IF(swsol.EQ.1)THEN
                rd1=b**2-4.0*a*c
-               IF(rd1.LT.0.0)rd1=0.0
-               tdsh=(-b+sqrt(rd1))/(2.0*a)
-               trav=tref+tdsh
+               IF(rd1 >= 0.0)then
+                  tdsh=(-b+sqrt(rd1))/(2.0*a)
+                  trav=tref+tdsh
+               endif
                ! if no root for quandratic equation or the travel time is not
                ! valid
                if(rd1<0.0 .or. trav<min(ttn(iz,j),ttn(k,ix)))then
-                   if(nsts(iz,j) == 0) trav = ttn(iz,j) + slown*dnx
-                   if(nsts(k,ix) == 0 .and. trav > ttn(k,ix) + slown*dnz)then 
-                       trav = ttn(k,ix) + slown*dnz
+                   if(nsts(iz,j) == 0) trav = ttn(iz,j) + slown*dnx*ri
+                   if(nsts(k,ix) == 0 .and. trav > ttn(k,ix) + slown*risti*dnz)then 
+                       trav = ttn(k,ix) + slown*dnz*risti
                    endif
                endif
                IF(tsw1.EQ.1)THEN
@@ -383,6 +387,10 @@ tsw1=0
 slown=1.0/veln(iz,ix)
 ri=earth
 risti=ri*sin(gox+(ix-1)*dnx)
+if(abs(earth)<1e-6)then
+   ri = 1
+   risti = 1
+endif
 DO j=ix-1,ix+1,2
    IF(j.GE.1.AND.j.LE.nnx)THEN
       swj=-1
@@ -435,10 +443,10 @@ DO j=ix-1,ix+1,2
             IF(swj.EQ.0)THEN
                swsol=1
                IF(swk.EQ.0)THEN
-                  !u=2.0*ri*dnx
-                  !v=2.0*risti*dnz
-                  u = 2.0*dnx
-                  v = 2.0*dnz
+                  u=2.0*ri*dnx
+                  v=2.0*risti*dnz
+                  !u = 2.0*dnx
+                  !v = 2.0*dnz
                   em=4.0*ttn(iz,j)-ttn(iz,j2)-4.0*ttn(k,ix)
                   em=em+ttn(k2,ix)
                   a=v**2+u**2
@@ -447,10 +455,10 @@ DO j=ix-1,ix+1,2
                   tref=4.0*ttn(iz,j)-ttn(iz,j2)
                   tdiv=3.0
                ELSE IF(nsts(k,ix).EQ.0)THEN
-                  !u=risti*dnz
-                  !v=2.0*ri*dnx
-                  u=dnz
-                  v=2.0*dnx
+                  u=risti*dnz
+                  v=2.0*ri*dnx
+                  !u=dnz
+                  !v=2.0*dnx
                   em=3.0*ttn(k,ix)-4.0*ttn(iz,j)+ttn(iz,j2)
                   a=v**2+9.0*u**2
                   b=6.0*em*u**2
@@ -458,7 +466,8 @@ DO j=ix-1,ix+1,2
                   tref=ttn(k,ix)
                   tdiv=1.0
                ELSE
-                  u=2.0*dnx
+                  u=2.0*ri*dnx
+                  !u=2.0*dnx
                   a=1.0
                   b=0.0
                   c=-u**2*slown**2
@@ -468,8 +477,10 @@ DO j=ix-1,ix+1,2
             ELSE IF(nsts(iz,j).EQ.0)THEN
                swsol=1
                IF(swk.EQ.0)THEN
-                  u=dnx
-                  v=2.0*dnz
+                  !u=dnx
+                  !v=2.0*dnz
+                  u=ri*dnx
+                  v=2.0*risti*dnz
                   em=3.0*ttn(iz,j)-4.0*ttn(k,ix)+ttn(k2,ix)
                   a=v**2+9.0*u**2
                   b=6.0*em*u**2
@@ -477,8 +488,10 @@ DO j=ix-1,ix+1,2
                   tref=ttn(iz,j)
                   tdiv=1.0
                ELSE IF(nsts(k,ix).EQ.0)THEN
-                  u=dnx
-                  v=dnz
+                  !u=dnx
+                  !v=dnz
+                  u=ri*dnx
+                  v=risti*dnz
                   em=ttn(k,ix)-ttn(iz,j)
                   a=u**2+v**2
                   b=-2.0*u**2*em
@@ -488,14 +501,16 @@ DO j=ix-1,ix+1,2
                ELSE
                   a=1.0
                   b=0.0
-                  c=-slown**2*dnx**2
+                  !c=-slown**2*dnx**2
+                  c=-slown**2*ri**2*dnx**2
                   tref=ttn(iz,j)
                   tdiv=1.0
                ENDIF
             ELSE
                IF(swk.EQ.0)THEN
                   swsol=1
-                  u=2.0*dnz
+                  u=2.0*risti*dnz
+                  !u=2.0*dnz
                   a=1.0
                   b=0.0
                   c=-u**2*slown**2
@@ -505,7 +520,8 @@ DO j=ix-1,ix+1,2
                   swsol=1
                   a=1.0
                   b=0.0
-                  c=-slown**2*dnz**2
+                  !c=-slown**2*dnz**2
+                  c=-slown**2*risti**2*dnz**2
                   tref=ttn(k,ix)
                   tdiv=1.0
                ENDIF
@@ -515,15 +531,16 @@ DO j=ix-1,ix+1,2
 !
             IF(swsol.EQ.1)THEN
                rd1=b**2-4.0*a*c
-               IF(rd1.LT.0.0)rd1=0.0
-               tdsh=(-b+sqrt(rd1))/(2.0*a)
-               trav=(tref+tdsh)/tdiv
+               IF(rd1>=0.0)then
+                  tdsh=(-b+sqrt(rd1))/(2.0*a)
+                  trav=(tref+tdsh)/tdiv
+               endif
                ! if no root for quandratic equation or the travel time is not
                ! valid
                if(rd1<0.0 .or. trav<min(ttn(iz,j),ttn(k,ix)))then
-                   if(nsts(iz,j) == 0) trav = ttn(iz,j) + slown*dnx
-                   if(nsts(k,ix) == 0 .and. trav > ttn(k,ix) + slown*dnz)then 
-                       trav = ttn(k,ix) + slown*dnz
+                   if(nsts(iz,j) == 0) trav = ttn(iz,j) + slown*ri*dnx
+                   if(nsts(k,ix) == 0 .and. trav > ttn(k,ix) + slown*risti*dnz)then 
+                       trav = ttn(k,ix) + slown*dnz*risti
                    endif
                endif
                IF(tsw1.EQ.1)THEN

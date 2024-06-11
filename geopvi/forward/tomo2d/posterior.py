@@ -40,6 +40,7 @@ class Posterior():
         self.gdy = config.getint('FMM','gdy')
         self.sdx = config.getint('FMM','sdx')
         self.sext = config.getint('FMM','sext')
+        self.earth = config.getfloat('FMM','earth')
 
         self.mask = np.ascontiguousarray(mask)
         self.src = src
@@ -71,7 +72,7 @@ class Posterior():
         """
         time, dtdv = fm2d(vel, self.srcx, self.srcy, self.recx, self.recy, self.mask,
                         self.nx, self.ny, self.xmin, self.ymin, self.dx, self.dy, 
-                        self.gdx, self.gdy, self.sdx, self.sext)
+                        self.gdx, self.gdy, self.sdx, self.sext, self.earth)
         return time, dtdv
 
     def fmm(self, x):
@@ -85,7 +86,7 @@ class Posterior():
             vel = x.data.numpy()[i].squeeze().astype(np.float64)
             time[i], dtdv[i] = fm2d(vel, self.srcx, self.srcy, self.recx, self.recy, self.mask,
                             self.nx, self.ny, self.xmin, self.ymin, self.dx, self.dy, 
-                            self.gdx, self.gdy, self.sdx, self.sext)
+                            self.gdx, self.gdy, self.sdx, self.sext, self.earth)
         return time, dtdv
 
     def fmm_parallel(self, x):

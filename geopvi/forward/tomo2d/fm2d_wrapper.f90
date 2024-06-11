@@ -9,9 +9,9 @@ module fm2d_wrapper
 contains
 
     subroutine fm2d(nsrc,srcx,srcy, &
-        nrec, recx, recy, mask, &
-        nx, ny, xmin, ymin, dx, dy, &
-        gdx, gdy, sdx, sext, vel, time, dtdv)
+            nrec, recx, recy, mask, &
+            nx, ny, xmin, ymin, dx, dy, &
+            gdx, gdy, sdx, sext, vel, time, dtdv,earth)
         use m_fm2d, only : modrays, T_RAY
         integer(c_int), intent(in) :: nsrc
         real(kind=c_double), dimension(:), intent(in) :: srcx
@@ -28,8 +28,9 @@ contains
         real(kind=c_double), dimension(:,:), intent(in) :: vel
         real(kind=c_double), dimension(:,:), intent(inout) :: time
         real(kind=c_double), dimension(:,:,:,:), intent(out) :: dtdv
+        real(kind=c_double), intent(in) :: earth
 
-        real(kind=c_double), parameter :: earth = 6371
+        !real(kind=c_double), parameter :: earth = 6371
         integer :: crazyray
         type(T_RAY), dimension(:),allocatable :: rays
         real(kind=c_double) :: band
@@ -136,32 +137,32 @@ contains
 
 
     subroutine c_fm2d(nsrc,srcx,srcy,nrec,recx,recy,nx,ny,mask,&
-        xmin,ymin,dx,dy,gdx,gdy,sdx, sext, vel,time,dtdv) bind(c)
-    integer(c_int), intent(in) :: nsrc
-    real(kind=c_double), intent(in) :: srcx(nsrc)
-    real(kind=c_double), intent(in) :: srcy(nsrc)
-    integer(c_int), intent(in) :: nrec
-    real(kind=c_double), intent(in) :: recx(nrec)
-    real(kind=c_double), intent(in) :: recy(nrec)
-    integer(c_int), intent(in) :: mask(nrec*nsrc,2)
-    integer(c_int), intent(in) :: nx, ny
-    real(kind=c_double), intent(in) :: xmin, ymin
-    real(kind=c_double), intent(in) :: dx, dy
-    integer(c_int), intent(in) :: gdx, gdy
-    integer(c_int), intent(in) :: sdx, sext
-    real(kind=c_double), intent(in) :: vel(ny,nx)
-    real(kind=c_double), intent(out) :: time(nrec,nsrc)
-    real(kind=c_double), intent(out) :: dtdv(ny,nx,nrec,nsrc)
+            xmin,ymin,dx,dy,gdx,gdy,sdx, sext, vel,time,dtdv,earth) bind(c)
+        integer(c_int), intent(in) :: nsrc
+        real(kind=c_double), intent(in) :: srcx(nsrc)
+        real(kind=c_double), intent(in) :: srcy(nsrc)
+        integer(c_int), intent(in) :: nrec
+        real(kind=c_double), intent(in) :: recx(nrec)
+        real(kind=c_double), intent(in) :: recy(nrec)
+        integer(c_int), intent(in) :: mask(nrec*nsrc,2)
+        integer(c_int), intent(in) :: nx, ny
+        real(kind=c_double), intent(in) :: xmin, ymin
+        real(kind=c_double), intent(in) :: dx, dy
+        integer(c_int), intent(in) :: gdx, gdy
+        integer(c_int), intent(in) :: sdx, sext
+        real(kind=c_double), intent(in) :: vel(ny,nx)
+        real(kind=c_double), intent(out) :: time(nrec,nsrc)
+        real(kind=c_double), intent(out) :: dtdv(ny,nx,nrec,nsrc)
+        real(kind=c_double), intent(in) :: earth
 
-    call fm2d(nsrc,srcx,srcy,nrec,recx,recy,mask,&
-        nx,ny,xmin,ymin,dx,dy,gdx,gdy,sdx, sext, vel,&
-        time,dtdv)
+        call fm2d(nsrc,srcx,srcy,nrec,recx,recy,mask,&
+            nx,ny,xmin,ymin,dx,dy,gdx,gdy,sdx, sext, vel,&
+            time,dtdv,earth)
 
     end subroutine
 
-    
-    subroutine c_fm2d_lglike(nsrc,srcx,srcy,nrec,recx,recy,nx,ny,mask,&
-            xmin,ymin,dx,dy,gdx,gdy,sdx, sext,nv,vel,tobs,lglike,grads) bind(c)
+    subroutine c_fm2d_parallel(nsrc,srcx,srcy,nrec,recx,recy,nx,ny,mask,&
+            xmin,ymin,dx,dy,gdx,gdy,sdx, sext,nv,vel,times,earth) bind(c)
         integer(c_int), intent(in) :: nsrc
         real(kind=c_double), intent(in) :: srcx(nsrc)
         real(kind=c_double), intent(in) :: srcy(nsrc)
@@ -176,9 +177,47 @@ contains
         integer(c_int), intent(in) :: sdx, sext
         integer(c_int), intent(in) :: nv
         real(kind=c_double), intent(in) :: vel(ny,nx,nv)
-        real(kind=c_double), intent(in) :: tobs(nrec*nsrc)
+        real(kind=c_double), intent(out) :: times(nrec*nsrc,nv)
+        real(kind=c_double), intent(in) :: earth
+
+        real(kind=c_double)  :: time(nrec,nsrc)
+        real(kind=c_double), dimension(:,:,:,:), allocatable  :: dtdv
+        integer i, j
+        
+        allocate(dtdv(ny,nx,nrec,nsrc))
+        !$omp parallel
+        !$omp do private(time,dtdv,i,j)
+        do i = 1, nv
+            call fm2d(nsrc,srcx,srcy,nrec,recx,recy,mask,&
+                nx,ny,xmin,ymin,dx,dy,gdx,gdy,sdx, sext, vel(:,:,i),&
+                time,dtdv,earth)
+            times(:,i)= reshape(time,(/nrec*nsrc/))
+        enddo
+        !$omp end do
+        !$omp end parallel
+
+    end subroutine
+
+    subroutine c_fm2d_lglike(nsrc,srcx,srcy,nrec,recx,recy,nx,ny,mask,&
+            xmin,ymin,dx,dy,gdx,gdy,sdx, sext,nv,vel,tobs,lglike,grads,earth) bind(c)
+        integer(c_int), intent(in) :: nsrc
+        real(kind=c_double), intent(in) :: srcx(nsrc)
+        real(kind=c_double), intent(in) :: srcy(nsrc)
+        integer(c_int), intent(in) :: nrec
+        real(kind=c_double), intent(in) :: recx(nrec)
+        real(kind=c_double), intent(in) :: recy(nrec)
+        integer(c_int), intent(in) :: mask(nrec*nsrc,2)
+        integer(c_int), intent(in) :: nx, ny
+        real(kind=c_double), intent(in) :: xmin, ymin
+        real(kind=c_double), intent(in) :: dx, dy
+        integer(c_int), intent(in) :: gdx, gdy
+        integer(c_int), intent(in) :: sdx, sext
+        integer(c_int), intent(in) :: nv
+        real(kind=c_double), intent(in) :: vel(ny,nx,nv)
+        real(kind=c_double), intent(in) :: tobs(2,nrec*nsrc)
         real(kind=c_double), intent(out) :: lglike(nv)
         real(kind=c_double), intent(out) :: grads(ny*nx,nv)
+        real(kind=c_double), intent(in) :: earth
 
         real(kind=c_double)  :: time(nrec,nsrc), time1d(nrec*nsrc)
         real(kind=c_double), dimension(:,:,:,:), allocatable  :: dtdv
@@ -194,12 +233,12 @@ contains
         do i = 1, nv
             call fm2d(nsrc,srcx,srcy,nrec,recx,recy,mask,&
                 nx,ny,xmin,ymin,dx,dy,gdx,gdy,sdx, sext, vel(:,:,i),&
-                time,dtdv)
+                time,dtdv,earth)
             time1d = reshape(time,(/nrec*nsrc/))
             dtdv2d = reshape(dtdv,(/ny*nx,nrec*nsrc/))
-            lglike(i) = sum((tobs-time1d)**2)
+            lglike(i) = 0.5*sum((tobs(1,:)-time1d)**2/tobs(2,:)**2)
             do j = 1, nrec*nsrc
-                grads(:,i) = grads(:,i) + dtdv2d(:,j)*(tobs(j)-time1d(j))
+                grads(:,i) = grads(:,i) + dtdv2d(:,j)*(tobs(1,j)-time1d(j))/tobs(2,j)**2
             enddo
         enddo
         !$omp end do
