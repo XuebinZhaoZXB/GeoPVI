@@ -58,8 +58,8 @@ if __name__ == "__main__":
     argparser.add_argument("--nflow", default=1, type=int, help='number of flows')
     argparser.add_argument("--nsample", default=2, type=int, help='number of samples for MC integration during each iteration')
     argparser.add_argument("--prcs", default=2, type=int, help='number of processes in parallel to perform forward evaluation')
-    argparser.add_argument("--iterations", default=100, type=int, help='number of iterations to update variational parameters')
-    argparser.add_argument("--lr", default=0.005, type=float, help='learning rate')
+    argparser.add_argument("--iterations", default=5000, type=int, help='number of iterations to update variational parameters')
+    argparser.add_argument("--lr", default=0.002, type=float, help='learning rate')
     argparser.add_argument("--ini_dist", default='Normal', type=str, help='initial (base) distribution for flows-based model')
     argparser.add_argument("--sigma", default=0.1, type=float, help='data noise level')
 
@@ -72,7 +72,7 @@ if __name__ == "__main__":
     argparser.add_argument("--fwi_config", default='config.ini', type=str, help='filename containing parameters for forward simulation')
     argparser.add_argument("--datafile", default='waveform.npy', type=str, help='filename for observed dataset')
     argparser.add_argument("--flow_init_name", type=str, default='none', help='Parameter filename for flow initial value')
-    argparser.add_argument("--outdir", type=str, default='output/test/', help='folder path (relative to basepath) for output files')
+    argparser.add_argument("--outdir", type=str, default='output/', help='folder path (relative to basepath) for output files')
 
     argparser.add_argument("--verbose", default=True, type=bool, help='Output and print intermediate inversion results')
     argparser.add_argument("--save_intermediate_result", default=True, type=bool,
