@@ -12,8 +12,8 @@ from datetime import datetime
 import PyDDS.dds_io as io
 
 from geopvi.prior import Uniform, Normal
-from geopvi.vi.models import VariationalDistribution, VariationalInversion
-from geopvi.vi.flows import *
+from geopvi.nfvi.models import FlowsBasedDistribution, VariationalInversion
+from geopvi.nfvi.flows import *
 from geopvi.forward.fwi3d_bp.posterior import Posterior
 import geopvi.forward.fwi3d_bp.dask_utils as du 
 from geopvi.utils import smooth_matrix_3D as smooth_matrix
@@ -60,32 +60,31 @@ if __name__ == "__main__":
     argparser.add_argument("--basepath", metavar='basepath', type=str, help='Project path',
                             default='/lustre03/other/2029iw/study/00_GeoPVI/examples/fwi3d_bp/')
 
-    argparser.add_argument("--flow", default='Linear', type=str)
-    argparser.add_argument("--kernel", default='structured', type=str)
-    argparser.add_argument("--kernel_size", default=5, type=int)
-    argparser.add_argument("--nflow", default=1, type=int)
-    argparser.add_argument("--nsample", default=5, type=int)
-    argparser.add_argument("--iterations", default=1000, type=int)
-    argparser.add_argument("--lr", default=0.005, type=float)
-    argparser.add_argument("--ini_dist", default='Normal', type=str)
+    argparser.add_argument("--flow", default='Linear', type=str, help='Flows used to perform inversion')
+    argparser.add_argument("--kernel", default='structured', type=str, help='Covariance kernel type if Linear flow is used')
+    argparser.add_argument("--kernel_size", default=5, type=int, help='Local covariance kernel size if PSVI is performed')
+    argparser.add_argument("--nflow", default=1, type=int, help='number of flows')
+    argparser.add_argument("--nsample", default=5, type=int, help='number of samples for MC integration during each iteration')
+    argparser.add_argument("--iterations", default=1000, type=int, help='number of iterations to update variational parameters')
+    argparser.add_argument("--lr", default=0.005, type=float, help='learning rate')
+    argparser.add_argument("--ini_dist", default='Normal', type=str, help='initial (base) distribution for flows-based model')
     # argparser.add_argument("--sigma", default=2e-8, type=float)
     # argparser.add_argument("--sigma", default=6e-8, type=float)
-    argparser.add_argument("--sigma", default=2e-7, type=float)
+    argparser.add_argument("--sigma", default=2e-7, type=float, help='data noise level')
 
-    argparser.add_argument("--smooth", default=False, type=bool)
-    argparser.add_argument("--smoothx", default=1000, type=float)
-    argparser.add_argument("--smoothy", default=1000, type=float)
-    argparser.add_argument("--smoothz", default=1000, type=float)
+    argparser.add_argument("--smooth", default=False, type=bool, help='Whether to apply smooth factor on model vector m')
+    argparser.add_argument("--smoothx", default=1000, type=float, help='Smoothness parameter, smaller value means stronger smoothness')
+    argparser.add_argument("--smoothy", default=1000, type=float, help='Smoothness parameter, smaller value means stronger smoothness')
+    argparser.add_argument("--smoothz", default=1000, type=float, help='Smoothness parameter, smaller value means stronger smoothness')
 
-    argparser.add_argument("--prior_type", default='Uniform', type=str)
-    argparser.add_argument("--prior_param", default='Uniform_prior.txt', type=str)
+    argparser.add_argument("--prior_type", default='Uniform', type=str, help='Prior pdf - either Uniform or Normal, or user-defined')
+    argparser.add_argument("--prior_param", default='Uniform_prior.txt', type=str, help='filename containing hyperparametes to define prior pdf')
     argparser.add_argument("--fwi_config", default='config_highfreq.ini', type=str, help='configure file for FWI')
     argparser.add_argument("--flow_init_name", type=str, default='Linear_structured_ite300_parameter_midf_nos.npy', 
                                 help='Parameter filename for flow initial value')
-    argparser.add_argument("--outdir", type=str, default='output/psvi_highf_nos/', 
-                                help='Folder for inversion results')
+    argparser.add_argument("--outdir", type=str, default='output/psvi_highf_nos/', help='folder path (relative to basepath) for output files')
     
-    argparser.add_argument("--verbose", default=True, type=bool, help='Output intermediate results')
+    argparser.add_argument("--verbose", default=True, type=bool, help='Output and print intermediate inversion results')
     argparser.add_argument("--save_intermediate_result", default=True, type=bool,
                                 help='Whether save intermediate training model, for resume from previous training')
     argparser.add_argument("--resume", default=False, type=bool, help='Resume previous training')
@@ -191,9 +190,9 @@ if __name__ == "__main__":
     # if the initial distribution of flow model is a Uniform distribution, 
     # then add a flow to transform from constrained to real space
     if args.ini_dist == 'Uniform':
-        flows.insert(0, Constr2Real(lower = 0, upper = 1))
-    flows.append(Real2Constr(lower = lower, upper = upper))
-    variational = VariationalDistribution(flows, base = args.ini_dist)
+        flows.insert(0, Constr2Real(dim = ndim, lower = 0, upper = 1))
+    flows.append(Real2Constr(dim = ndim, lower = lower, upper = upper))
+    variational = FlowsBasedDistribution(flows, base = args.ini_dist)
 
     # define VI class to perform inversion
     inversion = VariationalInversion(variationalDistribution = variational, log_posterior = posterior.log_prob)
@@ -214,7 +213,8 @@ if __name__ == "__main__":
             print('Invalid name for model checkpoint!')
         start_ite = checkpoint['iteration']
         variational.load_state_dict(checkpoint['model_state_dict'])
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        if 'optimizer_state_dict' in checkpoint.keys():
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         loss_his = checkpoint['loss']
         print(f'Resume training from previous run at iteration {start_ite:4d}\n')
     else:
@@ -238,7 +238,6 @@ if __name__ == "__main__":
     torch.save({
                 'iteration': (len(loss_his)),
                 'model_state_dict': variational.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
                 'loss': loss_his,
                 }, name)
 
