@@ -71,9 +71,13 @@ class Uniform():
         upper (numpy array): upper bound of the Uniform distribution
         smooth_matrix (scipy sparse): smooth matrix applied on model samples, used to define smooth prior pdf
         '''
+        if np.isscalar(upper):
+            upper = np.array([upper])
+        if np.isscalar(lower):
+            lower = np.array([lower])
         self.lower = torch.from_numpy(lower)
         self.upper = torch.from_numpy(upper)
-        self.dim = lower.size
+        # self.dim = lower.size
         self.smooth_matrix = smooth_matrix
 
     def log_prob(self, x):
