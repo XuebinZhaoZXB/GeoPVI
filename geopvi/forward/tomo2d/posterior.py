@@ -20,10 +20,7 @@ class ForwardModel(Function):
 
 
 class Posterior():
-    def __init__(self, data, config, src, rec, mask = None, sigma=0.05, lower = np.NINF, upper = np.PINF, 
-                        num_processes = 1, log_prior = None):
-        self.lower = lower
-        self.upper = upper
+    def __init__(self, data, config, src, rec, mask = None, sigma=0.05, num_processes = 1, log_prior = None):
         self.num_processes = num_processes
         self.log_prior = log_prior
 
@@ -49,22 +46,6 @@ class Posterior():
         self.srcy = np.ascontiguousarray(src[:,1])
         self.recx = np.ascontiguousarray(rec[:,0])
         self.recy = np.ascontiguousarray(rec[:,1])
-
-    def real_2_const(self, x):
-        if (np.isneginf(self.lower) and np.isposinf(self.upper)):
-            z = x
-            log_det = 0
-        elif (not np.isneginf(self.lower) and np.isposinf(self.upper)):
-            z = self.lower + torch.exp(x)
-            log_det = x.sum(1)
-        elif (np.isneginf(self.lower) and not np.isposinf(self.upper)):
-            z = self.upper - torch.exp(x)
-            log_det = x.sum(1)
-        else:
-            z = self.lower + (self.upper - self.lower) / (1 + torch.exp(-x))
-            log_det = (np.log(self.upper - self.lower) - x - 
-                        2 * torch.log(1 + torch.exp(-x))).sum(1)
-        return z, log_det
 
     def solver(self, vel):
         """
@@ -112,7 +93,6 @@ class Posterior():
         This version considers the transform from real to constrained space
         thus returns log_loke + log_det
         """
-        # model, log_det = self.real_2_const(x)
         if self.num_processes == 1:
             d_syn = ForwardModel.apply(x, self.fmm)
         else:
