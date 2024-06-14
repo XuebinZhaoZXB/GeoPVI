@@ -163,7 +163,7 @@ if __name__ == "__main__":
                     )
 
     variational.eval()
-    samples = variational.sample(3000).data.numpy()
+    samples = variational.sample(3000)
     name = os.path.join(args.basepath, args.outdir, f'{args.flow}_{args.kernel}_samples.npy')
     np.save(name, samples)
 

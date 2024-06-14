@@ -65,7 +65,7 @@ class FlowsBasedDistribution(nn.Module):
         for flow in self.flows:
             x, _ = flow.forward(x, train = False)
         self.train()
-        return x
+        return x.data.numpy()
 
 
 class VariationalInversion():
@@ -132,7 +132,7 @@ class VariationalInversion():
 
                     # # If you want to get posterior samples and save them, you can use the following:
                     self.variationalDistribution.eval()
-                    samples = self.variationalDistribution.sample(2000).data.numpy()
+                    samples = self.variationalDistribution.sample(1000)
                     np.save('samples_intermediate.npy', samples)
                     self.variationalDistribution.train()
 
