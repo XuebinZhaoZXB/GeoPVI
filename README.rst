@@ -4,7 +4,7 @@ GeoPVI
 
 This package solves fully nonlinear Bayesian **Geo**\ physical inverse problems using **P**\ arametric **V**\ ariational **I**\ nference methods.
 In GeoPVI, a variational distribution is defined to approximate the Bayesian posterior probability distribution function (pdf) and is represented
-by parametric (semi-analytic) expressions. GeoPVI currently features mean field and full rank automatic differentiation variational inference (ADVI), 
+by parametric (semi-analytic) expressions. GeoPVI currently features automatic differentiation variational inference (ADVI), 
 physically structured variational inference (PSVI), normalising flows, and boosting variational inference (BVI). 
 Future updates will expand this package to incorporate other parametric variational methods that have been tested in geophysics. 
 
@@ -48,8 +48,8 @@ See examples in ``examples`` folder.
 
 Get started
 ---------------------
-To perform Bayesian inversion using GeoPVI, you need to define two main components: 
-a variational distribution and a function to estimate posterior probability value.
+To perform Bayesian inversion using GeoPVI, two main components are required: 
+a function to estimate the posterior probability values and a variational distribution.
 
 .. code-block:: python
     
