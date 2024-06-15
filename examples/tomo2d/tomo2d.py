@@ -142,7 +142,7 @@ if __name__ == "__main__":
     start_ite = 0
     # if start_ite != 0, we load the previously saved model checkpoint and resume training
     if args.resume:
-        name = os.path.join(args.basepath, args.outdir, f'{args.flow}_{args.kernel}_model.pt')
+        name = os.path.join(args.basepath, args.outdir, f'{args.flow}_model.pt')
         try:
             checkpoint = torch.load(name)
         except:
@@ -164,13 +164,13 @@ if __name__ == "__main__":
 
     variational.eval()
     samples = variational.sample(3000)
-    name = os.path.join(args.basepath, args.outdir, f'{args.flow}_{args.kernel}_samples.npy')
+    name = os.path.join(args.basepath, args.outdir, f'{args.flow}_samples.npy')
     np.save(name, samples)
 
-    name = os.path.join(args.basepath, args.outdir, f'{args.flow}_{args.kernel}_loss.txt')
+    name = os.path.join(args.basepath, args.outdir, f'{args.flow}_loss.txt')
     np.savetxt(name, loss_his)
 
-    name = os.path.join(args.basepath, args.outdir, f'{args.flow}_{args.kernel}_model.pt')
+    name = os.path.join(args.basepath, args.outdir, f'{args.flow}_model.pt')
     torch.save({
                 'iteration': (len(loss_his)),
                 'model_state_dict': variational.state_dict(),
