@@ -2,7 +2,7 @@
 GeoPVI (Geophysical Inversion using Parametric Variational Inference)
 #####################################################################
 
-This package solves fully nonlinear (Bayesian) **Geo**physical inverse problems using **P**arametric **V**ariational **I**nference, 
+This package solves fully nonlinear (Bayesian) **Geo** physical inverse problems using **P**arametric **V**ariational **I**nference, 
 in which a variational distribution is defined to approximate the Bayesian posterior probability distribution function (pdf) and is represented
 by parametric (analytic) expressions. GeoPVI currently features mean field and full rank automatic differentiation variational inference (ADVI), 
 physically structured variational inference (PSVI), normalising flows, and boosting variational inference (BVI).
