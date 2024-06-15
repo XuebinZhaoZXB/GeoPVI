@@ -1,11 +1,12 @@
 #####################################################################
-GeoPVI (Geophysical Inversion using Parametric Variational Inference)
+GeoPVI
 #####################################################################
 
-This package solves fully nonlinear (Bayesian) **Geo**\ physical inverse problems using **P**\ arametric **V**\ ariational **I**\ nference, 
-in which a variational distribution is defined to approximate the Bayesian posterior probability distribution function (pdf) and is represented
+This package solves fully nonlinear Bayesian **Geo**\ physical inverse problems using **P**\ arametric **V**\ ariational **I**\ nference methods.
+In GeoPVI, a variational distribution is defined to approximate the Bayesian posterior probability distribution function (pdf) and is represented
 by parametric (analytic) expressions. GeoPVI currently features mean field and full rank automatic differentiation variational inference (ADVI), 
-physically structured variational inference (PSVI), normalising flows, and boosting variational inference (BVI).
+physically structured variational inference (PSVI), normalising flows, and boosting variational inference (BVI). 
+Future updates will expand this package to incorporate other parametric variational methods that have been tested in geophysics. 
 
 
 Requirements
@@ -31,6 +32,7 @@ If you don't have permission to install GeoPVI into your Python environment, sim
 in ``setup.sh``.
 
 The package is still in heavy development and can change rapidly. Therefore, it is recommended to install GeoPVI in an editable mode. 
+
 Alternatively, if you do not want to install the package, run
 
 .. code-block:: sh
@@ -50,6 +52,7 @@ Get started
 ---------------------
 To perform Bayesian inversion using variational inference methods, you need to define two main components: 
 a variational distribution and a function to estimate posterior probability value.
+
 .. code-block:: python
     
     def log_prob(m):
@@ -59,6 +62,7 @@ a variational distribution and a function to estimate posterior probability valu
     return logp
 
 To define a variational distribution
+
 .. code-block:: python
 
     from geopvi.nfvi.models import FlowsBasedDistribution
@@ -71,6 +75,7 @@ To define a variational distribution
 This defines a transformed diagonal Gaussian distribution as a variational distribution, corresponding to mean field ADVI.
 
 GeoPVI provides a wrapper to perform variational inversion:
+
 .. code-block:: python
 
     from geopvi.nfvi.models import VariationalInversion
@@ -82,11 +87,15 @@ which updates the variational distribution for 1000 iterations and with 10 sampl
 This returns the ``negative_elbo`` value for each iteration. 
 
 After training, posterior samples can be obtained by
+
 .. code-block:: python
 
     samples = variational_pdf.sample(nsample = 2000)
 
-For comprehensive guides and examples on using GeoPVI, please check out GeoPVI user manual in ``doc`` folder and tutorials in``examples``.
+
+Documentation
+---------------
+For comprehensive guides and examples on using GeoPVI, please check out GeoPVI user manual in ``doc`` folder and tutorials in ``examples``.
 
 
 Examples
@@ -97,13 +106,13 @@ Examples
 - For an example implementation of 3D full waveform inversion, please see the example in ``examples/fwi3d``. Note
   that this requires users to provide an external 3D FWI code to calculate misfit values and gradients. See details
   in ``geopvi/fwi3d``.
-- Other implementation examples can be found in ``example/tutorials``.
+- Other implementation examples can be found in ``examples/tutorials``.
 
 
 Specifically for BP HPC server
 -------------------------------
 GeoPVI are tested using ``intel-2019`` and ``intel-2020`` conda environments.
-To perform 3D FWI using BP's server and the ``tdwi`` solver, please use codes in ``geopvi/forward/fwi3d_bp``.
+To perform 3D FWI using BP's server and the ``tdwi`` solver, please use codes in ``geopvi/forward/fwi3d_bp`` and ``examples/fwi3d_bp``.
 
 
 References
