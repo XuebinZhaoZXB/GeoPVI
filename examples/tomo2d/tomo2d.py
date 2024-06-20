@@ -16,8 +16,7 @@ from geopvi.prior import Uniform, Normal
 
 if __name__ == "__main__":
     argparser = ArgumentParser(description='2D travel time tomography using GeoPVI')
-    argparser.add_argument("--basepath", metavar='basepath', type=str, help='Project path',
-                            default='/lustre03/other/2029iw/study/00_GeoPVI/examples/tomo2d/')
+    argparser.add_argument("--basepath", metavar='basepath', type=str, help='Project path', default='./')
 
     argparser.add_argument("--flow", default='NSF_CL', type=str, help='Flows used to perform inversion')
     argparser.add_argument("--kernel", default='fullrank', type=str, help='Covariance kernel type if Linear flow is used')

@@ -49,8 +49,7 @@ def get_flow_param(flow):
 
 if __name__ == "__main__":
     argparser = ArgumentParser(description='2D Bayesian Full waveform Inversion using GeoPVI')
-    argparser.add_argument("--basepath", metavar='basepath', type=str, help='Project path',
-                            default='/lustre03/other/2029iw/study/00_GeoPVI/examples/fwi2d/')
+    argparser.add_argument("--basepath", metavar='basepath', type=str, help='Project path', default='./')
 
     argparser.add_argument("--flow", default='Linear', type=str, help='Flows used to perform inversion')
     argparser.add_argument("--kernel", default='structured', type=str, help='Covariance kernel type if Linear flow is used')
