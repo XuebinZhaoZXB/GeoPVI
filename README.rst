@@ -56,8 +56,9 @@ a function to estimate the posterior probability values and a variational distri
     
     def log_prob(m):
         # Input array of samples m has a shape of (nsamples, ndim)
-        # This function outputs the log-posterior values for m
-        logp = log_prior + log_like
+        # This function returns the log-posterior values for m
+        # by summing logarithmic prior and likelihood values for m
+        logp = log_prior(m) + log_like(m)
     return logp
 
 To define a variational distribution
@@ -101,20 +102,14 @@ Examples
 ---------
 - For a complete 2D travel time tomography example, please see the example in ``examples/tomo2d``. 
 - For a complete 2D full waveform inversion example, please see the example in ``examples/fwi2d``. 
-- For a complete 3D full waveform inversion example using the **BP** ``tdwi`` forward modeller, please see the example in ``examples/fwi3d_bp``.
 - For an example implementation of 3D full waveform inversion, please see the example in ``examples/fwi3d``. Note
   that this requires users to provide an external 3D FWI code to calculate misfit values and gradients. See details
   in ``geopvi/fwi3d``.
 - Other implementation examples can be found in ``examples/tutorials``.
 
 
-Specifically for BP HPC server
--------------------------------
-GeoPVI are tested using ``intel-2019`` and ``intel-2020`` conda environments.
-To perform 3D FWI using BP's server and the ``tdwi`` solver, please use codes in ``geopvi/forward/fwi3d_bp`` and ``examples/fwi3d_bp``.
-
-
 References
 ----------
 - Zhao, X., Curtis, A. & Zhang, X. (2022). Bayesian seismic tomography using normalizing flows. Geophysical Journal International, 228 (1), 213-239.
 - Zhao, X., & Curtis, A. (2024). Bayesian inversion, uncertainty analysis and interrogation using boosting variational inference. Journal of Geophysical Research: Solid Earth 129 (1), e2023JB027789
+- Zhao, X., & Curtis, A. (2024). Physically Structured Variational Inference for Bayesian Full Waveform Inversion. ESS Open archive.

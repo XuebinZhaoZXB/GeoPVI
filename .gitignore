@@ -10,6 +10,8 @@ fwi2d_smooth/
 fwi3d_vpr/
 # **/fwi3d_bp/
 
+**/*bp/
+
 geopvi/prior_vpr.py
 
 # 3D FWI code related
