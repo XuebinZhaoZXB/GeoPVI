@@ -95,7 +95,7 @@ After training, posterior samples can be obtained by
 
 Documentation
 ---------------
-For comprehensive guides and examples on using GeoPVI, please check out GeoPVI user manual in ``doc`` folder and tutorials in ``examples``.
+For comprehensive guides and examples on using GeoPVI, please check out GeoPVI user manual in ``doc`` folder and tutorials in ``examples/tutorials``.
 
 
 Examples
