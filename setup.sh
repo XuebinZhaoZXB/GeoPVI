@@ -14,7 +14,7 @@ cd ../../../
 
 echo "Build 2d FMM solver..."
 cd geopvi/forward/tomo2d
-RESULT="$(python setup.py build_ext -i 2>&1)"
+RESULT="$(make && python setup.py build_ext -i 2>&1)"
 status=$?
 if [ $status -eq 0 ]; then
     echo "Building 2d FMM solver succeeds"

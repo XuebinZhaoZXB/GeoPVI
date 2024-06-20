@@ -57,7 +57,8 @@ a function to estimate the posterior probability values and a variational distri
     def log_prob(m):
         # Input array of samples m has a shape of (nsamples, ndim)
         # This function outputs the log-posterior values for m
-        logp = log_prior + log_like
+        # by summing logarithmic prior and likelihood values for m
+        logp = log_prior(m) + log_like(m)
     return logp
 
 To define a variational distribution
@@ -94,7 +95,7 @@ After training, posterior samples can be obtained by
 
 Documentation
 ---------------
-For comprehensive guides and examples on using GeoPVI, please check out GeoPVI user manual in ``doc`` folder and tutorials in ``examples``.
+For comprehensive guides and examples on using GeoPVI, please check out GeoPVI user manual in ``doc`` folder and tutorials in ``examples/tutorials``.
 
 
 Examples
