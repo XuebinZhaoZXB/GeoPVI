@@ -84,7 +84,7 @@ class Uniform():
         '''
         Compute log probability using PyTorch, such that the result can be back propagated
         '''
-        logp = - torch.log(self.upper - self.lower).sum()
+        logp = - torch.log(self.upper - self.lower).sum(axis = -1)
 
         if self.smooth_matrix is not None:
             logp_smooth = Smoothing.apply(x, self.smooth_matrix)
