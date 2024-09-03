@@ -52,7 +52,9 @@ void fwi_2D(char input_file[200], float *vel_inner, float *record_syn,
 	int ns0;//=100;				//the distance of first shot to the left side of the model
 	int depths;//=nz/2;//100;			//shot and receiver depth
 	int depthr;//=nz/2;
+	int nr;
   	int dr;//=1;			//receivers distributed in every two points in both X- and Y-directions
+	int nr0;//=100;				//the distance of first receiver to the left side of the model
 	int nt_interval;//=1;
 	
 	float dx;//=10.0;
@@ -63,7 +65,7 @@ void fwi_2D(char input_file[200], float *vel_inner, float *record_syn,
 	// char input_file[200] = "./input/input_param.txt";
 
 	read_parameters(input_file, &nx, &nz, &pml0, &Lc, &laplace_solver, &ns, &nt, &ds, &ns0, 
-						&depths, &depthr, &dr, &nt_interval,
+						&depths, &depthr, &nr, &dr, &nr0, &nt_interval,
 						&dx, &dz, &dt, &f0);
 	Lc += 1;	// second order FD scheme +1 
 	float *fd;	//finite difference coefficients
@@ -114,7 +116,7 @@ void fwi_2D(char input_file[200], float *vel_inner, float *record_syn,
 	//==============observation system definition===============//
 	//==============observation system definition===============//
   	int is;  	
-  	int rnmax=nx/dr;			//maximum receiver number along X-direction
+  	int rnmax=nr;			//maximum receiver number along X-direction
   	
 	struct Source ss[ns];			// struct pointer for source variables
 	
@@ -146,7 +148,7 @@ void fwi_2D(char input_file[200], float *vel_inner, float *record_syn,
 	{
 		for(ip=0;ip<ss[is].r_n;ip++)
 		{
-			ss[is].r_ix[ip] = pml+ip*dr;
+			ss[is].r_ix[ip] = pml+ip*dr+nr0;
 			ss[is].r_id[ss[is].r_ix[ip]]=ip;			
 		}
 	}
@@ -387,7 +389,9 @@ void forward_2D(char input_file[200], float *vel_inner, float *record_syn, int r
 	int ns0;//=100;				//the distance of first shot to the left side of the model
 	int depths;//=nz/2;//100;			//shot and receiver depth
 	int depthr;//=nz/2;
+	int nr;
   	int dr;//=1;			//receivers distributed in every two points in both X- and Y-directions
+	int nr0;//=100;				//the distance of first receiver to the left side of the model
 	int nt_interval;//=1;
 	
 	float dx;//=10.0;
@@ -398,7 +402,7 @@ void forward_2D(char input_file[200], float *vel_inner, float *record_syn, int r
 	// char input_file[200] = "./input/input_param.txt";
 
 	read_parameters(input_file, &nx, &nz, &pml0, &Lc, &laplace_solver, &ns, &nt, &ds, &ns0, 
-						&depths, &depthr, &dr, &nt_interval,
+						&depths, &depthr, &nr, &dr, &nr0, &nt_interval,
 						&dx, &dz, &dt, &f0);
 	Lc += 1;	// second order FD scheme +1 
 	float *fd;	//finite difference coefficients
@@ -451,7 +455,7 @@ void forward_2D(char input_file[200], float *vel_inner, float *record_syn, int r
 	//==============observation system definition===============//
 	//==============observation system definition===============//
   	int is;  	
-  	int rnmax=nx/dr;			//maximum receiver number along X-direction
+  	int rnmax=nr;			//maximum receiver number along X-direction
   	
 	struct Source ss[ns];			// struct pointer for source variables
 	
@@ -483,7 +487,7 @@ void forward_2D(char input_file[200], float *vel_inner, float *record_syn, int r
 	{
 		for(ip=0;ip<ss[is].r_n;ip++)
 		{
-			ss[is].r_ix[ip] = pml+ip*dr;
+			ss[is].r_ix[ip] = pml+ip*dr+nr0;
 			ss[is].r_id[ss[is].r_ix[ip]]=ip;			
 		}
 	}
@@ -1323,7 +1327,7 @@ void fd_coefficient(int Lc, float *fd)
 
 void read_parameters(char inputfile[200], int *nx, int *nz, int *pml0, int *Lc, int *laplace_slover, 
 						int *ns, int *nt, int *ds, int *ns0, 
-						int *depths, int *depthr, int *dr, int *nt_interval,
+						int *depths, int *depthr, int *nr, int *dr, int nr0, int *nt_interval,
 						float *dx, float *dz, float *dt, float *f0)
 {
 	char strtmp[256];
@@ -1341,7 +1345,9 @@ void read_parameters(char inputfile[200], int *nx, int *nz, int *pml0, int *Lc, 
 	read_int_value(strtmp, fp, ns0);
 	read_int_value(strtmp, fp, depths);
 	read_int_value(strtmp, fp, depthr);
+	read_int_value(strtmp, fp, nr);
 	read_int_value(strtmp, fp, dr);
+	read_int_value(strtmp, fp, nr0);
 	read_int_value(strtmp, fp, nt_interval);
 
 	read_float_value(strtmp, fp, dx);
