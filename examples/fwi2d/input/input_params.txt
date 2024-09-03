@@ -20,8 +20,12 @@
 1
 --Depth of receiver in grid points (depthr)
 9
+--Total number of receivers (nr)
+250
 --Receiver interval in grid points (dr)
 1
+--Grid number of the first receiver to the left of the model (nr0)
+0
 --Time step interval of saved wavefield during forward (nt_interval)
 2
 --Grid spacing in x direction (dx)

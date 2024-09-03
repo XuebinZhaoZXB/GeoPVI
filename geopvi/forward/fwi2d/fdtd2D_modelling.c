@@ -1327,7 +1327,7 @@ void fd_coefficient(int Lc, float *fd)
 
 void read_parameters(char inputfile[200], int *nx, int *nz, int *pml0, int *Lc, int *laplace_slover, 
 						int *ns, int *nt, int *ds, int *ns0, 
-						int *depths, int *depthr, int *nr, int *dr, int nr0, int *nt_interval,
+						int *depths, int *depthr, int *nr, int *dr, int *nr0, int *nt_interval,
 						float *dx, float *dz, float *dt, float *f0)
 {
 	char strtmp[256];

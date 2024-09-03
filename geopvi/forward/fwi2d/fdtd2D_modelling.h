@@ -45,7 +45,7 @@ void wavenumber(int ntx, int ntz, float dx, float dz, float *k);
 void get_velp(int pml, int ntx, int ntz, float *vel_inner, float *velp);
 void read_parameters(char inputfile[200], int *nx, int *nz, int *pml0, int *Lc, int *laplace_slover, 
 						int *ns, int *nt, int *ds, int *ns0, 
-						int *depths, int *depthr, int *nr, int *dr, int nr0, int *nt_interval,
+						int *depths, int *depthr, int *nr, int *dr, int *nr0, int *nt_interval,
 						float *dx, float *dz, float *dt, float *f0);
 void read_int_value(char strtmp[256], FILE *fp, int *param);
 void read_float_value(char strtmp[256], FILE *fp, float *param);
