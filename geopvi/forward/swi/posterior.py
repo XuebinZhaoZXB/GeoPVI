@@ -74,9 +74,23 @@ class Posterior3D_dc():
         self.mode = mode
         self.velocity = velocity
 
-    def solver(self, x):
+    def solver1D(self, vs):
         '''
-        Calculate modelled data and data-model gradient by calling the external forward function (surf96)
+        1D forward simulation and gradient calculation given 1 single s-wave velocity profile
+        by calling the external forward function (surf96)
+        Return:
+            log_like: log likelihood of the given model
+            dlog_like: gradient of log_like w.r.t the given model
+        '''
+        phase, gradient = forward_sw(vs, self.periods, self.thick, relative_step = 0.005, 
+                                            wave = self.wave, mode = self.mode, velocity = self.velocity)
+        log_like = - 0.5 * np.sum(((self.data - phase)/self.sigma) ** 2, axis = -1)
+        dlog_like = np.sum(((self.data - phase)/self.sigma**2)[..., None] * gradient, axis = -2)
+        return log_like, dlog_like
+
+    def solver3D(self, x):
+        '''
+        3D forward simulation and gradient calculation by calling multiple self.solver1D in parallel
         '''
         m, n = x.shape
         phase = np.zeros([m, self.data.shape[0]])
