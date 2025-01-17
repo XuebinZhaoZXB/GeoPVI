@@ -61,12 +61,24 @@ class Posterior3D_dc():
                          wave = 'rayleigh', mode = 1, velocity = 'phase'):
         self.log_prior = log_prior
         self.num_processes = num_processes
-        self.sigma = sigma
 
         if len(data) % len(periods) != 0:
             raise ValueError('Observed dispersion curve and defined periods have different sizes.')
         else:
             self.npoints = len(data) // len(periods)    # number of dispersion curves to be inverted
+
+        # ensure sigma has the same size as data
+        if np.isscalar(sigma):
+            self.sigma = sigma * np.ones_like(data)
+        elif isinstance(sigma, np.ndarray):
+            elif len(sigma) == len(periods):
+                self.sigma = np.tile(sigma, self.npoints)
+            elif len(sigma) == len(data):
+                self.sigma = sigma
+            else:
+                raise ValueError('Incorrect size for data error sigma.')
+        else:
+            raise ValueError('Incorrect type for data error sigma.')
         self.data = data
         self.periods = periods
         self.thick = thick
@@ -74,37 +86,43 @@ class Posterior3D_dc():
         self.mode = mode
         self.velocity = velocity
 
-    def solver1D(self, vs):
+    def solver1D(self, i, vs):
         '''
         1D forward simulation and gradient calculation given 1 single s-wave velocity profile
         by calling the external forward function (surf96)
+        Input:
+            vs: 1D array representing the S-wave velocity profile (nlayer,)
         Return:
-            log_like: log likelihood of the given model
-            dlog_like: gradient of log_like w.r.t the given model
+            log_like: log likelihood of the given model, scalar
+            dlog_like: gradient of log_like w.r.t the given model, 1D array (nlayer,)
         '''
+        data = self.data[i * len(self.periods): (i + 1) * len(self.periods)]
+        sigma = self.sigma[i * len(self.periods): (i + 1) * len(self.periods)]
+
         phase, gradient = forward_sw(vs, self.periods, self.thick, relative_step = 0.005, 
-                                            wave = self.wave, mode = self.mode, velocity = self.velocity)
-        log_like = - 0.5 * np.sum(((self.data - phase)/self.sigma) ** 2, axis = -1)
-        dlog_like = np.sum(((self.data - phase)/self.sigma**2)[..., None] * gradient, axis = -2)
+                                            wave = self.wave, mode = self.mode, velocity = self.velocity, requires_grad = True)
+        log_like = - 0.5 * np.sum(((data - phase)/sigma) ** 2, axis = -1)
+        dlog_like = np.sum(((data - phase)/sigma**2)[..., None] * gradient, axis = -2)
         return log_like, dlog_like
 
     def solver3D(self, x):
         '''
         3D forward simulation and gradient calculation by calling multiple self.solver1D in parallel
         '''
-        m, n = x.shape
-        phase = np.zeros([m, self.data.shape[0]])
-        gradient = np.zeros([m, self.data.shape[0], n])
-        for i in range(m):
-            vs = x.data.numpy()[i].squeeze()
-            phase[i], gradient[i] = forward_sw(vs, self.periods, self.thick, relative_step = 0.005, 
-                                                   wave = self.wave, mode = self.mode, velocity = self.velocity)
-        log_like = - 0.5 * np.sum(((self.data - phase)/self.sigma) ** 2, axis = -1)
-        dlog_like = np.sum(((self.data - phase)/self.sigma**2)[..., None] * gradient, axis = -2)
-        '''
-        Todo: output correct gradient for 3D inversion based on 1D gradient
-        '''
-        return log_like, dlog_like
+        m, _ = x.shape
+        total_profile = m * self.npoints
+        if not isinstance(x, np.ndarray):
+            x = x.detach().numpy().reshape(total_profile, -1)
+        log_like = np.zeros(total_profile)
+        grad = np.zeros(x.shape)
+
+        with Pool(processes = self.num_processes) as pool:
+            results = pool.starmap(self.solver1D, [(i % self.npoints, x[i]) for i in range(total_profile)])
+        for i in range(total_profile):
+            log_like[i] = results[i][0]
+            grad[i] = results[i][1]
+
+        return log_like.reshape(m, -1).sum(aixs = 1), grad.reshape(m, -1)
     
     def log_prob(self, x):
         """
@@ -112,7 +130,7 @@ class Posterior3D_dc():
         """
         if x.shape[1] != len(self.thick) * self.npoints:
             raise ValueError('Thickness and vs have different sizes.')
-        log_like = ForwardModel.apply(x, self.solver)
+        log_like = ForwardModel.apply(x, self.solver3D)
         log_prior = self.log_prior(x)
         # # set a prior information: the top layer has minimum shear-velocity
         # # This ensures the computed phase velocities are phase velocities of Rayleigh or Love waves  
@@ -168,7 +186,7 @@ class Posterior1D():
         for i in range(m):
             vs = x.data.numpy()[i].squeeze()
             phase[i], gradient[i] = forward_sw(vs, self.periods, self.thick, relative_step = 0.005, 
-                                                   wave = self.wave, mode = self.mode, velocity = self.velocity)
+                                                wave = self.wave, mode = self.mode, velocity = self.velocity, requires_grad = True)
         log_like = - 0.5 * np.sum(((self.data - phase)/self.sigma) ** 2, axis = -1)
         dlog_like = np.sum(((self.data - phase)/self.sigma**2)[..., None] * gradient, axis = -2)
         return log_like, dlog_like
