@@ -71,7 +71,7 @@ class Posterior3D_dc():
         if np.isscalar(sigma):
             self.sigma = sigma * np.ones_like(data)
         elif isinstance(sigma, np.ndarray):
-            elif len(sigma) == len(periods):
+            if len(sigma) == len(periods):
                 self.sigma = np.tile(sigma, self.npoints)
             elif len(sigma) == len(data):
                 self.sigma = sigma
@@ -122,7 +122,7 @@ class Posterior3D_dc():
             log_like[i] = results[i][0]
             grad[i] = results[i][1]
 
-        return log_like.reshape(m, -1).sum(aixs = 1), grad.reshape(m, -1)
+        return log_like.reshape(m, -1).sum(axis = 1), grad.reshape(m, -1)
     
     def log_prob(self, x):
         """
