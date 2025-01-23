@@ -5,6 +5,7 @@ from torch.multiprocessing import Pool
 
 from pysurf96 import surf96     # this needs to be changed if the forward model is intergrated into GeoPVI
 
+maximum_ite = 10
 
 class ForwardModel(Function):
     @staticmethod
@@ -21,61 +22,72 @@ class ForwardModel(Function):
         return grad_input, None
 
 
-# def forward_sw(vs, periods, thick, vp_vs = 1.76, relative_step = 0.01, wave = 'love', mode = 1, 
-#                        velocity = 'group', requires_grad = True):
-#     vp = vp_vs * vs
-#     rho = 2.35 + 0.036 * (vp - 3.)**2
-#     d_syn = surf96(thick, vp, vs, rho, periods, wave = wave, mode = mode, velocity = velocity)
-
-#     gradient = np.zeros((len(periods), len(vs)))
-#     if requires_grad:
-#         for i in range(len(vs)):
-#             vs_tmp = vs.copy()
-#             step = relative_step * vs[i]
-#             vs_tmp[i] += step
-#             vp_tmp = vp_vs * vs_tmp
-#             rho_tmp = 2.35 + 0.036 * (vp_tmp - 3.)**2
-#             d_tmp = surf96(thick, vp_tmp, vs_tmp, rho_tmp, periods, wave = wave, mode = mode, velocity = velocity)
-#             derivative = (d_tmp - d_syn) / abs(step)
-#             gradient[:, i] = derivative
-
-#     return d_syn, gradient
-
-
-def forward_sw(vel, periods, thick, vp_vs = 1.76, relative_step = 0.005, wave = 'love', mode = 1, 
+def forward_sw(vs, periods, thick, vp_vs = 1.76, relative_step = 0.01, wave = 'love', mode = 1, 
                        velocity = 'group', requires_grad = True):
-    vs = vel.copy()
-    while True:
-        vp = vp_vs * vs
-        rho = 2.35 + 0.036 * (vp - 3.)**2
-        # vp = 1.16*vs + 1.36
-        # rho = 1.74*vp**0.25
-        d_syn = surf96(thick, vp, vs, rho, periods, wave = wave, mode = mode, velocity = velocity, flat_earth = True)
-        if (d_syn == 0).all():
-            vs = vel + np.random.normal(0, vel * 0.0005)
-        else:
-            break
+    vp = vp_vs * vs
+    rho = 2.35 + 0.036 * (vp - 3.)**2
+    d_syn = surf96(thick, vp, vs, rho, periods, wave = wave, mode = mode, velocity = velocity)
 
     gradient = np.zeros((len(periods), len(vs)))
     if requires_grad:
         for i in range(len(vs)):
             vs_tmp = vs.copy()
             step = relative_step * vs[i]
-            while True:
-                vs_tmp[i] = vs[i] + step
-                vp_tmp = vp_vs * vs_tmp
-                rho_tmp = 2.35 + 0.036 * (vp_tmp - 3.)**2
-                # vp_tmp = 1.16 * vs_tmp + 1.36
-                # rho_tmp = 1.74 * vp_tmp ** 0.25
-                d_tmp = surf96(thick, vp_tmp, vs_tmp, rho_tmp, periods, wave = wave, mode = mode, velocity = velocity)   
-                if (d_tmp == 0).all():
-                    step = np.random.uniform(-1., 1.) * relative_step  * vs[i]
-                else:
-                    derivative = (d_tmp - d_syn) / step
-                    gradient[:, i] = derivative
-                    break
+            vs_tmp[i] += step
+            vp_tmp = vp_vs * vs_tmp
+            rho_tmp = 2.35 + 0.036 * (vp_tmp - 3.)**2
+            d_tmp = surf96(thick, vp_tmp, vs_tmp, rho_tmp, periods, wave = wave, mode = mode, velocity = velocity)
+            derivative = (d_tmp - d_syn) / abs(step)
+            gradient[:, i] = derivative
 
     return d_syn, gradient
+
+
+# def forward_sw(vel, periods, thick, vp_vs = 1.76, relative_step = 0.005, wave = 'love', mode = 1, 
+#                        velocity = 'group', requires_grad = True):
+#     vs = vel.copy()
+#     for ite in range(maximum_ite):
+#         vp = vp_vs * vs
+#         rho = 2.35 + 0.036 * (vp - 3.)**2
+#         # vp = 1.16*vs + 1.36
+#         # rho = 1.74*vp**0.25
+#         d_syn = surf96(thick, vp, vs, rho, periods, wave = wave, mode = mode, velocity = velocity, flat_earth = True)
+#         if (d_syn == 0).all():
+#             vs = vel + np.random.normal(0, vel * 0.001)
+#         else:
+#             break
+#     if (d_syn == 0).all():
+#         for ite in range(maximum_ite):
+#             vs = vel + np.random.normal(0, vel * 0.01)
+#             vp = vp_vs * vs
+#             rho = 2.35 + 0.036 * (vp - 3.)**2
+#             # vp = 1.16*vs + 1.36
+#             # rho = 1.74*vp**0.25
+#             d_syn = surf96(thick, vp, vs, rho, periods, wave = wave, mode = mode, velocity = velocity, flat_earth = True)
+#             if (d_syn != 0).any():
+#                 break
+
+#     gradient = np.zeros((len(periods), len(vs)))
+#     if requires_grad:
+#         for i in range(len(vs)):
+#             vs_tmp = vs.copy()
+#             step = relative_step * vs[i]
+#             for ite in range(maximum_ite):
+#                 vs_tmp[i] = vs[i] + step
+#                 vp_tmp = vp_vs * vs_tmp
+#                 rho_tmp = 2.35 + 0.036 * (vp_tmp - 3.)**2
+#                 # vp_tmp = 1.16 * vs_tmp + 1.36
+#                 # rho_tmp = 1.74 * vp_tmp ** 0.25
+#                 d_tmp = surf96(thick, vp_tmp, vs_tmp, rho_tmp, periods, wave = wave, mode = mode, velocity = velocity)   
+#                 if (d_tmp == 0).all():
+#                     step = np.random.uniform(-2., 2.) * relative_step  * vs[i]
+#                     gradient[:, i] = 0.
+#                 else:
+#                     derivative = (d_tmp - d_syn) / step
+#                     gradient[:, i] = derivative
+#                     break
+
+#     return d_syn, gradient
 
 
 class Posterior3D_dc():
@@ -93,7 +105,7 @@ class Posterior3D_dc():
         mode: mode of modelled wave (int): representing fundamental or first overtone mode
         velocity: type of modelled dispersion data (str): 'phase' or 'group' representing phase or group velocity
     '''
-    def __init__(self, data, thick, periods, sigma = 0.003, log_prior = None, num_processes = 1, 
+    def __init__(self, data, thick, periods, sigma = 0.003, log_prior = None, num_processes = 1, relative_step_grad = 0.001,
                          wave = 'rayleigh', mode = 1, velocity = 'phase'):
         self.log_prior = log_prior
         self.num_processes = num_processes
@@ -121,6 +133,7 @@ class Posterior3D_dc():
         self.wave = wave
         self.mode = mode
         self.velocity = velocity
+        self.relative_step_grad = relative_step_grad
 
     def solver1D(self, i, vs):
         '''
@@ -135,7 +148,7 @@ class Posterior3D_dc():
         data = self.data[i * len(self.periods): (i + 1) * len(self.periods)]
         sigma = self.sigma[i * len(self.periods): (i + 1) * len(self.periods)]
 
-        phase, gradient = forward_sw(vs, self.periods, self.thick, relative_step = 0.001, wave = self.wave, 
+        phase, gradient = forward_sw(vs, self.periods, self.thick, relative_step = self.relative_step_grad, wave = self.wave, 
                                             mode = self.mode, velocity = self.velocity, requires_grad = True)
         log_like = - 0.5 * np.sum(((data - phase)/sigma) ** 2, axis = -1)
         dlog_like = np.sum(((data - phase)/sigma**2)[..., None] * gradient, axis = -2)
@@ -201,7 +214,7 @@ class Posterior1D():
         mode: mode of modelled wave (int): representing fundamental or first overtone mode
         velocity: type of modelled dispersion data (str): 'phase' or 'group' representing phase or group velocity
     '''
-    def __init__(self, data, thick, periods, sigma = 0.003, log_prior = None, num_processes = 1, 
+    def __init__(self, data, thick, periods, sigma = 0.003, log_prior = None, num_processes = 1, relative_step_grad = 0.005,
                          wave = 'rayleigh', mode = 1, velocity = 'phase'):
         self.log_prior = log_prior
         self.num_processes = num_processes
@@ -215,6 +228,7 @@ class Posterior1D():
         self.wave = wave
         self.mode = mode
         self.velocity = velocity
+        self.relative_step_grad = relative_step_grad
 
     def solver(self, x):
         '''
@@ -225,7 +239,7 @@ class Posterior1D():
         gradient = np.zeros([m, self.data.shape[0], n])
         for i in range(m):
             vs = x.data.numpy()[i].squeeze()
-            phase[i], gradient[i] = forward_sw(vs, self.periods, self.thick, relative_step = 0.001, wave = self.wave, 
+            phase[i], gradient[i] = forward_sw(vs, self.periods, self.thick, relative_step = self.relative_step_grad, wave = self.wave, 
                                                 mode = self.mode, velocity = self.velocity, requires_grad = True)
         log_like = - 0.5 * np.sum(((self.data - phase)/self.sigma) ** 2, axis = -1)
         dlog_like = np.sum(((self.data - phase)/self.sigma**2)[..., None] * gradient, axis = -2)
