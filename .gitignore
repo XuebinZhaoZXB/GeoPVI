@@ -10,7 +10,7 @@ fwi2d_overthrust/
 fwi2d_geol_prior/
 fwi2d_smooth/
 fwi3d_vpr/
-# **/fwi3d_bp/
+**/fwi3d_bp/
 
 **/*bp/
 
