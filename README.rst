@@ -56,7 +56,7 @@ a function to estimate the posterior probability values and a variational distri
     
     def log_prob(m):
         # Input array of samples m has a shape of (nsamples, ndim)
-        # This function returns the log-posterior values for m
+        # This function outputs the log-posterior values for m
         # by summing logarithmic prior and likelihood values for m
         logp = log_prior(m) + log_like(m)
     return logp

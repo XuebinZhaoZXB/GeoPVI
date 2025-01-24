@@ -5,6 +5,8 @@
 **/bash/
 
 # ignore example folders
+fwi2d_small/
+fwi2d_overthrust/
 fwi2d_geol_prior/
 fwi2d_smooth/
 fwi3d_vpr/
@@ -21,6 +23,8 @@ geopvi/prior_vpr.py
 # some .npy files (data or input parameters)
 **/fwi3d_bp/**/*.npy
 *.log
+*noisy*
+*linearised*
 
 
 ### Development environment

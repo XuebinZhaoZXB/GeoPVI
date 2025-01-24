@@ -9,36 +9,45 @@ from argparse import ArgumentParser
 import configparser
 import time
 from datetime import datetime
+import PyDDS.dds_io as io
 
+# from geopvi.prior import Uniform, Normal
+from geopvi.prior_vpr import Uniform, Normal, Gaussian
 from geopvi.nfvi.models import FlowsBasedDistribution, VariationalInversion
-from geopvi.nfvi.flows import Real2Constr, Constr2Real, Linear
-from geopvi.forward.fwi2d.posterior import Posterior 
-from geopvi.prior import Uniform, Normal
-from geopvi.utils import smooth_matrix_2D as smooth_matrix
+from geopvi.nfvi.flows import *
+from geopvi.forward.fwi3d_bp.posterior import Posterior
+import geopvi.forward.fwi3d_bp.dask_utils as du 
+from geopvi.utils import smooth_matrix_3D as smooth_matrix
 
 
-def get_offdiag_mask(correlation, ndim, nx = 1, nz = 1):
-    z, x = correlation.shape
+def init_vfwi(args, config):
+    Path(args.basepath + args.outdir).mkdir(parents=True, exist_ok=True)
+    Path(args.basepath + config.get('path', 'inpath')).mkdir(parents=True, exist_ok=True)
+    Path(args.basepath + config.get('path', 'print_path')).mkdir(parents=True, exist_ok=True)
+    Path(args.basepath + config.get('path', 'outpath')).mkdir(parents=True, exist_ok=True)
+    Path(args.basepath + config.get('dask', 'daskpath')).mkdir(parents=True, exist_ok=True)
+
+def get_offdiag_mask(correlation, ndim, nx = 1, ny = 1, nz = 1):
+    y, x, z = correlation.shape
     rank = (correlation != 0).sum() // 2
-    # cz, cx: coordinate for central point of the mask
-    cz, cx = (correlation.size)//2 // x, (correlation.size)//2 % x
+    cy = correlation.size // 2 // (x*z)
+    cx = correlation.size // 2 % (x*z) // z
+    cz = correlation.size // 2 % (x*z) % z
     offset = np.zeros(rank, dtype = int)
     mask = np.ones((rank, ndim), dtype = bool)
     i = 0
-    for iz in range(z):
+    for iy in range(y):
         for ix in range(x):
-            if correlation[iz, ix] == 0 or iz * x + ix >= (correlation.size)//2:
-                continue
-            offset[i] = (cz - iz) * nx + (cx - ix)
-            # self.non_diag[i, -offset[i]:] = torch.zeros(offset[i])
-            mask[i, -offset[i]:] = False
-            i += 1
+            for iz in range(z):
+                if correlation[iy, ix, iz] == 0 or iy*x*z + ix*z + iz >= (correlation.size)//2:
+                    continue
+                offset[i] = (cy - iy)*nx*nz + (cx - ix)*nz + (cz - iz)
+                mask[i, -offset[i]:] = False
+                i += 1
     return mask
-
 
 def get_flow_param(flow):
     mus = flow.u.detach().numpy()
-    # sigmas = np.log(np.exp(flow.diag.detach().numpy()) + 1)
     sigmas = np.exp(flow.diag.detach().numpy())
     if flow.non_diag is None:
         return np.hstack([mus, sigmas])
@@ -48,31 +57,35 @@ def get_flow_param(flow):
 
 
 if __name__ == "__main__":
-    argparser = ArgumentParser(description='2D Bayesian Full waveform Inversion using GeoPVI')
-    argparser.add_argument("--basepath", metavar='basepath', type=str, help='Project path', default='./')
+    argparser = ArgumentParser(description='3D Bayesian Full waveform Inversion using GeoPVI')
+    argparser.add_argument("--basepath", metavar='basepath', type=str, help='Project path',
+                            default='/lustre03/other/2029iw/study/00_GeoPVI/examples/fwi3d_bp/')
 
     argparser.add_argument("--flow", default='Linear', type=str, help='Flows used to perform inversion')
     argparser.add_argument("--kernel", default='structured', type=str, help='Covariance kernel type if Linear flow is used')
     argparser.add_argument("--kernel_size", default=5, type=int, help='Local covariance kernel size if PSVI is performed')
     argparser.add_argument("--nflow", default=1, type=int, help='number of flows')
-    argparser.add_argument("--nsample", default=2, type=int, help='number of samples for MC integration during each iteration')
-    argparser.add_argument("--prcs", default=2, type=int, help='number of processes in parallel to perform forward evaluation')
-    argparser.add_argument("--iterations", default=5000, type=int, help='number of iterations to update variational parameters')
-    argparser.add_argument("--lr", default=0.002, type=float, help='learning rate')
+    argparser.add_argument("--nsample", default=5, type=int, help='number of samples for MC integration during each iteration')
+    argparser.add_argument("--iterations", default=500, type=int, help='number of iterations to update variational parameters')
+    argparser.add_argument("--lr", default=0.005, type=float, help='learning rate')
     argparser.add_argument("--ini_dist", default='Normal', type=str, help='initial (base) distribution for flows-based model')
-    argparser.add_argument("--sigma", default=0.1, type=float, help='data noise level')
+    # argparser.add_argument("--sigma", default=2e-8, type=float)
+    # argparser.add_argument("--sigma", default=6e-8, type=float)
+    argparser.add_argument("--sigma", default=2e-7, type=float, help='data noise level')
 
     argparser.add_argument("--smooth", default=False, type=bool, help='Whether to apply smooth factor on model vector m')
-    argparser.add_argument("--smoothx", default=500, type=float, help='Smoothness parameter, smaller value means stronger smoothness')
-    argparser.add_argument("--smoothz", default=500, type=float, help='Smoothness parameter, smaller value means stronger smoothness')
+    argparser.add_argument("--smoothx", default=1000, type=float, help='Smoothness parameter, smaller value means stronger smoothness')
+    argparser.add_argument("--smoothy", default=1000, type=float, help='Smoothness parameter, smaller value means stronger smoothness')
+    argparser.add_argument("--smoothz", default=1000, type=float, help='Smoothness parameter, smaller value means stronger smoothness')
 
-    argparser.add_argument("--prior_type", default='Uniform', type=str, help='Prior pdf - either Uniform or Normal, or user-defined')
-    argparser.add_argument("--prior_param", default='prior.txt', type=str, help='filename containing hyperparametes to define prior pdf')
-    argparser.add_argument("--fwi_config", default='config.ini', type=str, help='filename containing parameters for forward simulation')
-    argparser.add_argument("--datafile", default='waveform.npy', type=str, help='filename for observed dataset')
-    argparser.add_argument("--flow_init_name", type=str, default='none', help='Parameter filename for flow initial value')
-    argparser.add_argument("--outdir", type=str, default='output/', help='folder path (relative to basepath) for output files')
-
+    argparser.add_argument("--prior_type", default='Normal', type=str, help='Prior pdf - either Uniform or Normal, or user-defined')
+    argparser.add_argument("--prior_param", default='Uniform_prior.txt', type=str, help='filename containing hyperparametes to define prior pdf')
+    argparser.add_argument("--fwi_config", default='config_highfreq.ini', type=str, help='configure file for FWI')
+    argparser.add_argument("--flow_init_name", type=str, default='../../fwi3d_vpr/output/geological_y10/Linear_structured_ite1000_parameter.npy', 
+                                help='Parameter filename for flow initial value')
+    argparser.add_argument("--outdir", type=str, default='output/psvi_highf_geol_finetune_vpr/geological_y10/', 
+                                help='folder path (relative to basepath) for output files')
+    
     argparser.add_argument("--verbose", default=True, type=bool, help='Output and print intermediate inversion results')
     argparser.add_argument("--save_intermediate_result", default=True, type=bool,
                                 help='Whether save intermediate training model, for resume from previous training')
@@ -108,52 +121,72 @@ if __name__ == "__main__":
     config._interpolation = configparser.ExtendedInterpolation()
     config.read(fwi_config_name)
 
-    # create output folder
-    Path(args.basepath + args.outdir).mkdir(parents=True, exist_ok=True)
+    init_vfwi(args, config)
 
     ## define FWI parameters
-    nz = config.getint('FWI','nz')
     nx = config.getint('FWI','nx')
-    water_layer = config.getint('FWI','layer_fixed')
-    vel_water = config.getfloat('FWI','vel_fixed')
-    ndim = (nz - water_layer) * nx
+    ny = config.getint('FWI','ny')
+    nz = config.getint('FWI','nz')
+    water_layer = config.getint('FWI','water_layer')
+    ndim = (nz - water_layer) * nx * ny
 
-    print(f'FWI model size: nx = {nx}, nz = {nz}')
+    print(f'FWI model size: ny = {ny}, nx = {nx}, nz = {nz}')
     print(f'Dimensionality of the problem: {ndim} ')
     print(f'Data noise is: {args.sigma}\n')
 
     # masked is defined to fix velocity values at their true values within the water layer 
-    mask = np.full([nz, nx], True)
-    mask[:water_layer] = False
+    mask = np.full([ny, nx, nz], True)
+    mask[:,:,:water_layer] = False
+    name = '/lustre03/other/EIP/variational/FWI/overthrust/data/overthrust_d50m.asp'
+    vel_true = io.fromfile(name)['Samples']
+    vel_water = vel_true[:,:,:water_layer]
 
-    data_obs = np.load(args.basepath + 'input/' + args.datafile)
-    data_obs = data_obs.flatten()
+    # define dask cluster for parallelisation computation
+    daskpath = args.basepath + config.get('dask','daskpath')
+    print(f'Create dask cluster at: {daskpath}\n')
+    cluster, client = du.dask_init(config.get('dask','pe'), config.getint('dask','nnodes'),
+                                   nworkers=config.getint('dask','nworkers'),
+                                   ph=config.getint('dask','ph'), odask=daskpath)
 
     # define Bayesian prior and posterior pdf
     prior_bounds = np.loadtxt(args.basepath + 'input/' + args.prior_param)
     lower = prior_bounds[water_layer:,0].astype(np.float64)
     upper = prior_bounds[water_layer:,1].astype(np.float64)
-    lower = np.broadcast_to(lower[:,None],((nz - water_layer),nx)).flatten()
-    upper = np.broadcast_to(upper[:,None],((nz - water_layer),nx)).flatten()
-    
+    lower = np.broadcast_to(lower[None, None, :],(ny, nx, (nz - water_layer))).flatten()
+    upper = np.broadcast_to(upper[None, None, :],(ny, nx, (nz - water_layer))).flatten()
+
     # define smooth matrix for smooth prior information
     if args.smooth:
-        L = smooth_matrix(nx, nz - water_layer, args.smoothx, args.smoothz)
+        L = smooth_matrix(nx, ny, nz - water_layer, args.smoothx, args.smoothy, args.smoothz)
     else:
         L = None
     print(f'Smoothed prior information: {args.smooth}')
 
-    # define Prior and Posterior pdf
-    if args.prior_type == 'Uniform':
-        prior = Uniform(lower = lower, upper = upper, smooth_matrix = L)
-    elif args.prior_type == 'Normal':
-        # This requires to have a loc (mean) vector and one parameter for covariance
-        prior = Normal(loc = (lower + upper)/2, std = np.sqrt((upper-lower)**2 / 12), smooth_matrix = L)
-    else:
-        raise NotImplementedError("Not supported Prior distribution")
-    print(f'Prior distribution is: {args.prior_type}')
-    posterior = Posterior(data_obs, config, vel_fixed = config.getfloat('FWI','vel_fixed'), sigma = args.sigma, num_processes = args.prcs, 
-                            log_prior = prior.log_prob, mask = mask.flatten(), paramfile = args.basepath + 'input/input_params.txt')
+    # # define Prior and Posterior pdf
+    # if args.prior_type == 'Uniform':
+    #     prior = Uniform(lower = lower, upper = upper, smooth_matrix = L)
+    # elif args.prior_type == 'Normal':
+    #     # This requires to have a loc (mean) vector and one parameter for covariance
+    #     prior = Normal(loc = loc, std = std)
+    # else:
+    #     raise NotImplementedError("Not supported Prior distribution")
+    # print(f'Prior distribution is: {args.prior_type}\n')
+    
+    # load geological prior pdf: Gaussian pdf in this example
+    parampath = '/lustre03/other/2029iw/study/00_GeoPVI/examples/fwi3d_vpr/'
+    name = os.path.join(parampath, 'input/gaussian_prior_cor_inverse_y10_x10_z10.npy')
+    gaussian_prior_param = np.load(name)
+    name = os.path.join(parampath, 'input/fwi_mean_std.npy')
+    fwi_mean_std = np.load(name)
+
+    # prior = Gaussian(param1 = (lower + upper)/2, param2 = np.sqrt((upper - lower)**2/12), param3 = gaussian_prior_param, 
+    #                 param2_type = 'local_cor', prior_type = args.prior_type, smooth_matrix = L)
+    prior = Gaussian(param1 = fwi_mean_std[0], param2 = fwi_mean_std[1]*7, param3 = gaussian_prior_param, 
+                    param2_type = 'local_cor', prior_type = args.prior_type, smooth_matrix = L)
+
+
+    posterior = Posterior(args, config, vel_water = vel_water, log_prior = prior.log_prob,
+                             mask = mask.flatten(), client = client)
 
     # define flows model
     flow = eval(args.flow)
@@ -164,11 +197,11 @@ if __name__ == "__main__":
         param = np.load(filename).flatten()
         print(f'Load basepath/input/{args.flow_init_name} as initial parameter value for flows model')
     if args.flow == 'Linear':
-        cov_template = np.ones((args.kernel_size, args.kernel_size))
-        off_diag_mask = get_offdiag_mask(cov_template, ndim, nx = nx, nz = nz - water_layer)
+        cov_template = np.ones((args.kernel_size, args.kernel_size, args.kernel_size))
+        off_diag_mask = get_offdiag_mask(cov_template, ndim, nx = nx, ny = ny, nz = nz - water_layer)
         flows = [flow(dim = ndim, kernel = args.kernel, mask = off_diag_mask, param = param)
                     for _ in range(args.nflow)]
- 
+
     # if the initial distribution of flow model is a Uniform distribution, 
     # then add a flow to transform from constrained to real space
     if args.ini_dist == 'Uniform':
@@ -202,17 +235,13 @@ if __name__ == "__main__":
     else:
         print(f'Start training at iteration {start_ite}\n')
 
+
     # Perform variational inversion
     loss_his.extend(
                     inversion.update(optimizer = 'torch.optim.Adam', lr = args.lr, n_iter = args.iterations, nsample = args.nsample, 
                                 n_out = args.nout, verbose = args.verbose, save_intermediate_result = args.save_intermediate_result, 
                                 outpath = args.basepath + args.outdir)
                     )
-
-    variational.eval()
-    samples = variational.sample(2000)
-    name = os.path.join(args.basepath, args.outdir, f'{args.flow}_{args.kernel}_samples.npy')
-    np.save(name, samples)
 
     param = get_flow_param(variational.flows[-2])
     name = os.path.join(args.basepath, args.outdir, f'{args.flow}_{args.kernel}_parameter.npy')
@@ -227,3 +256,5 @@ if __name__ == "__main__":
                 'model_state_dict': variational.state_dict(),
                 'loss': loss_his,
                 }, name)
+
+    du.dask_del(cluster, client, odask=daskpath)
