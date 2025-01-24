@@ -11,7 +11,8 @@ import time
 from datetime import datetime
 import PyDDS.dds_io as io
 
-from geopvi.prior import Uniform, Normal
+# from geopvi.prior import Uniform, Normal
+from geopvi.prior_vpr import Uniform, Normal, Gaussian
 from geopvi.nfvi.models import FlowsBasedDistribution, VariationalInversion
 from geopvi.nfvi.flows import *
 from geopvi.forward.fwi3d_bp.posterior import Posterior
@@ -65,7 +66,7 @@ if __name__ == "__main__":
     argparser.add_argument("--kernel_size", default=5, type=int, help='Local covariance kernel size if PSVI is performed')
     argparser.add_argument("--nflow", default=1, type=int, help='number of flows')
     argparser.add_argument("--nsample", default=5, type=int, help='number of samples for MC integration during each iteration')
-    argparser.add_argument("--iterations", default=1000, type=int, help='number of iterations to update variational parameters')
+    argparser.add_argument("--iterations", default=500, type=int, help='number of iterations to update variational parameters')
     argparser.add_argument("--lr", default=0.005, type=float, help='learning rate')
     argparser.add_argument("--ini_dist", default='Normal', type=str, help='initial (base) distribution for flows-based model')
     # argparser.add_argument("--sigma", default=2e-8, type=float)
@@ -77,12 +78,13 @@ if __name__ == "__main__":
     argparser.add_argument("--smoothy", default=1000, type=float, help='Smoothness parameter, smaller value means stronger smoothness')
     argparser.add_argument("--smoothz", default=1000, type=float, help='Smoothness parameter, smaller value means stronger smoothness')
 
-    argparser.add_argument("--prior_type", default='Uniform', type=str, help='Prior pdf - either Uniform or Normal, or user-defined')
+    argparser.add_argument("--prior_type", default='Normal', type=str, help='Prior pdf - either Uniform or Normal, or user-defined')
     argparser.add_argument("--prior_param", default='Uniform_prior.txt', type=str, help='filename containing hyperparametes to define prior pdf')
     argparser.add_argument("--fwi_config", default='config_highfreq.ini', type=str, help='configure file for FWI')
-    argparser.add_argument("--flow_init_name", type=str, default='Linear_structured_ite300_parameter_midf_nos.npy', 
+    argparser.add_argument("--flow_init_name", type=str, default='../../fwi3d_vpr/output/geological_y10/Linear_structured_ite1000_parameter.npy', 
                                 help='Parameter filename for flow initial value')
-    argparser.add_argument("--outdir", type=str, default='output/psvi_highf_nos/', help='folder path (relative to basepath) for output files')
+    argparser.add_argument("--outdir", type=str, default='output/psvi_highf_geol_finetune_vpr/geological_y10/', 
+                                help='folder path (relative to basepath) for output files')
     
     argparser.add_argument("--verbose", default=True, type=bool, help='Output and print intermediate inversion results')
     argparser.add_argument("--save_intermediate_result", default=True, type=bool,
@@ -160,16 +162,29 @@ if __name__ == "__main__":
         L = None
     print(f'Smoothed prior information: {args.smooth}')
 
-    # define Prior and Posterior pdf
-    if args.prior_type == 'Uniform':
-        prior = Uniform(lower = lower, upper = upper, smooth_matrix = L)
-    elif args.prior_type == 'Normal':
-        # This requires to have a loc (mean) vector and one parameter for covariance
-        prior = Normal(loc = loc, std = std)
-    else:
-        raise NotImplementedError("Not supported Prior distribution")
-    print(f'Prior distribution is: {args.prior_type}\n')
+    # # define Prior and Posterior pdf
+    # if args.prior_type == 'Uniform':
+    #     prior = Uniform(lower = lower, upper = upper, smooth_matrix = L)
+    # elif args.prior_type == 'Normal':
+    #     # This requires to have a loc (mean) vector and one parameter for covariance
+    #     prior = Normal(loc = loc, std = std)
+    # else:
+    #     raise NotImplementedError("Not supported Prior distribution")
+    # print(f'Prior distribution is: {args.prior_type}\n')
     
+    # load geological prior pdf: Gaussian pdf in this example
+    parampath = '/lustre03/other/2029iw/study/00_GeoPVI/examples/fwi3d_vpr/'
+    name = os.path.join(parampath, 'input/gaussian_prior_cor_inverse_y10_x10_z10.npy')
+    gaussian_prior_param = np.load(name)
+    name = os.path.join(parampath, 'input/fwi_mean_std.npy')
+    fwi_mean_std = np.load(name)
+
+    # prior = Gaussian(param1 = (lower + upper)/2, param2 = np.sqrt((upper - lower)**2/12), param3 = gaussian_prior_param, 
+    #                 param2_type = 'local_cor', prior_type = args.prior_type, smooth_matrix = L)
+    prior = Gaussian(param1 = fwi_mean_std[0], param2 = fwi_mean_std[1]*7, param3 = gaussian_prior_param, 
+                    param2_type = 'local_cor', prior_type = args.prior_type, smooth_matrix = L)
+
+
     posterior = Posterior(args, config, vel_water = vel_water, log_prior = prior.log_prob,
                              mask = mask.flatten(), client = client)
 
@@ -224,7 +239,8 @@ if __name__ == "__main__":
     # Perform variational inversion
     loss_his.extend(
                     inversion.update(optimizer = 'torch.optim.Adam', lr = args.lr, n_iter = args.iterations, nsample = args.nsample, 
-                                n_out = args.nout, verbose = args.verbose, save_intermediate_result = args.save_intermediate_result)
+                                n_out = args.nout, verbose = args.verbose, save_intermediate_result = args.save_intermediate_result, 
+                                outpath = args.basepath + args.outdir)
                     )
 
     param = get_flow_param(variational.flows[-2])

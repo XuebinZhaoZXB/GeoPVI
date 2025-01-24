@@ -149,7 +149,7 @@ if __name__ == "__main__":
         prior = Uniform(lower = lower, upper = upper, smooth_matrix = L)
     elif args.prior_type == 'Normal':
         # This requires to have a loc (mean) vector and one parameter for covariance
-        prior = Normal(loc = lower, std = upper)
+        prior = Normal(loc = (lower + upper)/2, std = np.sqrt((upper-lower)**2 / 12), smooth_matrix = L)
     else:
         raise NotImplementedError("Not supported Prior distribution")
     print(f'Prior distribution is: {args.prior_type}')
@@ -206,7 +206,8 @@ if __name__ == "__main__":
     # Perform variational inversion
     loss_his.extend(
                     inversion.update(optimizer = 'torch.optim.Adam', lr = args.lr, n_iter = args.iterations, nsample = args.nsample, 
-                                n_out = args.nout, verbose = args.verbose, save_intermediate_result = args.save_intermediate_result)
+                                n_out = args.nout, verbose = args.verbose, save_intermediate_result = args.save_intermediate_result, 
+                                outpath = args.basepath + args.outdir)
                     )
 
     variational.eval()

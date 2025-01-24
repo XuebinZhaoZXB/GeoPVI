@@ -183,9 +183,9 @@ class Linear(nn.Module):
                 elif kernel == 'structured':
                     if param[self.dim*2:].size == self.mask.size:
                         self.non_diag = nn.Parameter(torch.from_numpy(param[self.dim*2:].reshape(self.mask.shape)))
-                    # else:
+                    else:
                     #     # TODO: consider param only provides part of off-diagonal blocks
-                    #     raise ValueError("Shape of mask and parameter does not match!")
+                        raise ValueError("Shape of mask and parameter does not match!")
         if trainable is False:
             """
             Add this trainable feature, such that Linear flow can be used as 

@@ -82,7 +82,7 @@ class VariationalInversion():
         self.variationalDistribution = variationalDistribution
 
     def update(self, optimizer = 'torch.optim.Adam', lr = 0.001, n_iter = 1000, nsample = 10, n_out = 1, 
-                    verbose = False, save_intermediate_result = False, **kwargs):
+                    verbose = False, save_intermediate_result = False, outpath = './', **kwargs):
         '''
         Update variational model by optimising the variational objective function
         Input
@@ -127,8 +127,9 @@ class VariationalInversion():
                 print(f'The elapsed time is: {end-start:.2f} s')
 
                 # Save intermediate model parameters
-                if save_intermediate_result:                    
-                    np.savetxt('loss_intermediate.txt', loss)
+                if save_intermediate_result:          
+                    name = outpath + 'loss_intermediate.txt'
+                    np.savetxt(name, loss)
 
                     # # If you want to get posterior samples and save them, you can use the following:
                     self.variationalDistribution.eval()
@@ -142,7 +143,7 @@ class VariationalInversion():
                                 'model_state_dict': self.variationalDistribution.state_dict(),
                                 'optimizer_state_dict': optim.state_dict(),
                                 'loss': loss,
-                                }, 'model_intermediate.pt')
+                                }, f'{outpath}model_intermediate.pt')
                 
         if verbose:
             print(f'Iteration: {n_iter:>5d},\tLoss: {negative_elbo.data:>10.2f}')
