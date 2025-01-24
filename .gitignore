@@ -11,7 +11,7 @@ fwi2d_geol_prior/
 fwi2d_smooth/
 fwi3d_vpr/
 **/fwi3d_bp/
-
+geopvi/forward/fwi3d_bp
 **/*bp/
 
 geopvi/prior_vpr.py
