@@ -133,8 +133,8 @@ class VariationalInversion():
 
                     # # If you want to get posterior samples and save them, you can use the following:
                     self.variationalDistribution.eval()
-                    samples = self.variationalDistribution.sample(1000)
-                    np.save('samples_intermediate.npy', samples)
+                    samples = self.variationalDistribution.sample(500)
+                    np.save(outpath + f'samples_intermediate_ite{i}.npy', samples)
                     self.variationalDistribution.train()
 
                     # save intermediate normalising flows model
