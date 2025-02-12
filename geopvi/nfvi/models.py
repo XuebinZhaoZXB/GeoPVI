@@ -133,7 +133,7 @@ class VariationalInversion():
 
                     # # If you want to get posterior samples and save them, you can use the following:
                     self.variationalDistribution.eval()
-                    samples = self.variationalDistribution.sample(500)
+                    samples = self.variationalDistribution.sample(1000)
                     np.save(outpath + f'samples_intermediate_ite{i}.npy', samples)
                     self.variationalDistribution.train()
 

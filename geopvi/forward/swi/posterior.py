@@ -6,7 +6,8 @@ from torch.multiprocessing import Pool
 from pysurf96 import surf96     # this needs to be changed if the forward model is intergrated into GeoPVI
 from geopvi.forward.tomo2d.fmm import fm2d
 
-maximum_ite = 10
+MAXIMUM_ITER = 10
+MULTIPLY_FACTOR = 5
 
 
 class ForwardModel(Function):
@@ -24,72 +25,76 @@ class ForwardModel(Function):
         return grad_input, None
 
 
-def forward_sw(vs, periods, thick, vp_vs = 1.76, relative_step = 0.01, wave = 'love', mode = 1, 
-                       velocity = 'group', requires_grad = True):
-    vp = vp_vs * vs
-    rho = 2.35 + 0.036 * (vp - 3.)**2
-    d_syn = surf96(thick, vp, vs, rho, periods, wave = wave, mode = mode, velocity = velocity)
-
-    gradient = np.zeros((len(periods), len(vs)))
-    if requires_grad:
-        for i in range(len(vs)):
-            vs_tmp = vs.copy()
-            step = relative_step * vs[i]
-            vs_tmp[i] += step
-            vp_tmp = vp_vs * vs_tmp
-            rho_tmp = 2.35 + 0.036 * (vp_tmp - 3.)**2
-            d_tmp = surf96(thick, vp_tmp, vs_tmp, rho_tmp, periods, wave = wave, mode = mode, velocity = velocity)
-            derivative = (d_tmp - d_syn) / abs(step)
-            gradient[:, i] = derivative
-
-    return d_syn, gradient
-
-
-# def forward_sw(vel, periods, thick, vp_vs = 1.76, relative_step = 0.005, wave = 'love', mode = 1, 
+# def forward_sw(vs, periods, thick, vp_vs = 1.76, relative_step = 0.01, wave = 'love', mode = 1, 
 #                        velocity = 'group', requires_grad = True):
-#     vs = vel.copy()
-#     for ite in range(maximum_ite):
-#         vp = vp_vs * vs
-#         rho = 2.35 + 0.036 * (vp - 3.)**2
-#         # vp = 1.16*vs + 1.36
-#         # rho = 1.74*vp**0.25
-#         d_syn = surf96(thick, vp, vs, rho, periods, wave = wave, mode = mode, velocity = velocity, flat_earth = True)
-#         if (d_syn == 0).all():
-#             vs = vel + np.random.normal(0, vel * 0.001)
-#         else:
-#             break
-#     if (d_syn == 0).all():
-#         for ite in range(maximum_ite):
-#             vs = vel + np.random.normal(0, vel * 0.01)
-#             vp = vp_vs * vs
-#             rho = 2.35 + 0.036 * (vp - 3.)**2
-#             # vp = 1.16*vs + 1.36
-#             # rho = 1.74*vp**0.25
-#             d_syn = surf96(thick, vp, vs, rho, periods, wave = wave, mode = mode, velocity = velocity, flat_earth = True)
-#             if (d_syn != 0).any():
-#                 break
+#     vp = vp_vs * vs
+#     rho = 2.35 + 0.036 * (vp - 3.)**2
+#     d_syn = surf96(thick, vp, vs, rho, periods, wave = wave, mode = mode, velocity = velocity)
 
 #     gradient = np.zeros((len(periods), len(vs)))
 #     if requires_grad:
 #         for i in range(len(vs)):
 #             vs_tmp = vs.copy()
 #             step = relative_step * vs[i]
-#             for ite in range(maximum_ite):
-#                 vs_tmp[i] = vs[i] + step
-#                 vp_tmp = vp_vs * vs_tmp
-#                 rho_tmp = 2.35 + 0.036 * (vp_tmp - 3.)**2
-#                 # vp_tmp = 1.16 * vs_tmp + 1.36
-#                 # rho_tmp = 1.74 * vp_tmp ** 0.25
-#                 d_tmp = surf96(thick, vp_tmp, vs_tmp, rho_tmp, periods, wave = wave, mode = mode, velocity = velocity)   
-#                 if (d_tmp == 0).all():
-#                     step = np.random.uniform(-2., 2.) * relative_step  * vs[i]
-#                     gradient[:, i] = 0.
-#                 else:
-#                     derivative = (d_tmp - d_syn) / step
-#                     gradient[:, i] = derivative
-#                     break
+#             vs_tmp[i] += step
+#             vp_tmp = vp_vs * vs_tmp
+#             rho_tmp = 2.35 + 0.036 * (vp_tmp - 3.)**2
+#             d_tmp = surf96(thick, vp_tmp, vs_tmp, rho_tmp, periods, wave = wave, mode = mode, velocity = velocity)
+#             derivative = (d_tmp - d_syn) / abs(step)
+#             gradient[:, i] = derivative
 
 #     return d_syn, gradient
+
+
+def forward_sw(vel, periods, thick, vp_vs = 1.76, relative_step = 0.005, wave = 'love', mode = 1, 
+                       velocity = 'group', requires_grad = True, lower = None, upper = None):
+    vs = vel.copy()
+    perturb = relative_step
+    while True:
+        for ite in range(MAXIMUM_ITER):
+            vp = vp_vs * vs
+            rho = 2.35 + 0.036 * (vp - 3.)**2
+            # vp = 1.16*vs + 1.36
+            # rho = 1.74*vp**0.25
+            d_syn = surf96(thick, vp, vs, rho, periods, wave = wave, mode = mode, velocity = velocity, flat_earth = False)
+            if (d_syn == 0).all():
+                vs = vel + np.random.normal(0, vel * perturb)
+                if lower is not None:
+                    vs = np.maximum(vs, lower)
+                if upper is not None:    
+                    vs = np.minimum(vs, upper)
+            else:
+                break
+        if (d_syn == 0).all():
+            perturb *= MULTIPLY_FACTOR
+        else:
+            break
+
+    gradient = np.zeros((len(periods), len(vs)))
+    if requires_grad:
+        for i in range(len(vs)):
+            vs_tmp = vs.copy()
+            step = relative_step * vs[i]
+            for ite in range(MAXIMUM_ITER):
+                vs_tmp[i] = vs[i] + step
+                if lower is not None:
+                    vs_tmp[i] = np.maximum(vs_tmp[i], lower[i])
+                if upper is not None:
+                    vs_tmp[i] = np.minimum(vs_tmp[i], upper[i])
+                vp_tmp = vp_vs * vs_tmp
+                rho_tmp = 2.35 + 0.036 * (vp_tmp - 3.)**2
+                # vp_tmp = 1.16 * vs_tmp + 1.36
+                # rho_tmp = 1.74 * vp_tmp ** 0.25
+                d_tmp = surf96(thick, vp_tmp, vs_tmp, rho_tmp, periods, wave = wave, mode = mode, velocity = velocity, flat_earth = False)   
+                if (d_tmp == 0).all():
+                    step = np.random.normal(0, 1.) * MULTIPLY_FACTOR * relative_step * vs[i]
+                    gradient[:, i] = 0.
+                else:
+                    derivative = (d_tmp - d_syn) / step
+                    gradient[:, i] = derivative
+                    break
+
+    return d_syn, gradient
 
 
 class Posterior3D_dc():
@@ -205,9 +210,12 @@ class Posterior3D_tt():
         data: travel time data at each frequency (nperiods, nt)
     '''
     def __init__(self, data, config, src, rec, mask, thick, periods, sigma = 0.003, log_prior = None, 
-                        num_processes = 1, relative_step_grad = 0.001, wave = 'rayleigh', mode = 1, velocity = 'phase'):
+                        num_processes = 1, relative_step_grad = 0.001, wave = 'rayleigh', mode = 1, velocity = 'phase',
+                        lower = None, upper = None):
         self.log_prior = log_prior
         self.num_processes = num_processes
+        self.lower = lower
+        self.upper = upper
 
         # data array is supposed to have a shape of (nperiods, nt)
         # sigma can be either a scalar, or an 1D array with the same size as periods, or a 2D array with the same size as data
@@ -267,8 +275,9 @@ class Posterior3D_tt():
         by calling the external forward function (surf96)
         '''
         phase, gradient = forward_sw(vs, self.periods, self.thick, relative_step = self.relative_step_grad, wave = self.wave, 
-                                            mode = self.mode, velocity = self.velocity, requires_grad = True)
-        return phas, gradient
+                                            mode = self.mode, velocity = self.velocity, requires_grad = True,
+                                            lower = self.lower[:len(vs)], upper = self.upper[:len(vs)])
+        return phase, gradient
 
     def fmm2d(self, index, vel):
         """
