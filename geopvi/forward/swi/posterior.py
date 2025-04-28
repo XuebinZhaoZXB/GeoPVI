@@ -279,7 +279,7 @@ class Posterior3D_tt():
                                             lower = self.lower[:len(vs)], upper = self.upper[:len(vs)])
         return phase, gradient
 
-    def fmm2d(self, index, vel):
+    def fmm2d_loglike(self, index, vel):
         """
         2D fast marching method for travel time calculation and its gradient w.r.t. velocity
         Directly return the log-likelihood (negative misfit function) and gradient of the given model to save memory
@@ -296,6 +296,67 @@ class Posterior3D_tt():
         log_like = - 0.5 * np.sum(((data - time)/sigma) ** 2, axis = -1)
         dlog_like = np.sum(((data - time)/sigma**2)[..., None] * dtdv, axis = -2)
         return log_like, dlog_like
+
+    def fmm2d(self, index, vel):
+        """
+        2D fast marching method for travel time calculation and its gradient w.r.t. velocity
+        Return modelled travel time and the corresponding log-likelihood value. 
+        This is used for forward simulation
+        Args:
+            index: index of which periods to be calculated (int)
+            vel: 1D array representing the 2D velocity profile (nx*ny,)
+        """
+        time, _ = fm2d(vel, self.srcx, self.srcy, self.recx, self.recy, self.mask[index].reshape(2, -1),
+                        self.nx, self.ny, self.xmin, self.ymin, self.dx, self.dy, 
+                        self.gdx, self.gdy, self.sdx, self.sext, self.earth)
+
+        data = self.data[index]
+        sigma = self.sigma[index]
+        log_like = - 0.5 * np.sum(((data - time)/sigma) ** 2, axis = -1)
+        return log_like, time  
+
+    def forward3D(self, x):
+        '''
+        input: x is a 2D np.ndarray with a shape of (nsamples, nlayer * npoints)
+        3D forward simulation without gradient calculation -> output modelled travel time data
+        First perform surface wave dispersion curve calculation using forward_sw
+        Then calculate the travel time data using fast marching method
+        '''
+        m, _ = x.shape
+        total_profile = m * self.npoints
+        x = x.reshape(total_profile, -1)
+        disp_curve = np.zeros([total_profile, len(self.periods)])       # shape of (m * npoints, nperiods)
+
+        if self.num_processes == 1:
+            for i in range(total_profile):
+                disp_curve[i], grad_vs[i] = self.solver1D(i % self.npoints, x[i])
+            # TODO: implement the following FMM without parallelisation
+        else:
+            # 1. calculate dispersion curve data by calling dispersion_modelling
+            with Pool(processes = self.num_processes) as pool:
+                results = pool.map(self.dispersion_modelling, [x[i] for i in range(total_profile)])
+                # results = pool.starmap(self.solver1D, [(i % self.npoints, x[i]) for i in range(total_profile)])
+            for i in range(total_profile):
+                disp_curve[i] = results[i][0]
+                # grad_vs now has a shape of (m * npoints, nperiods, nz)
+            if (disp_curve == 0.).any():
+                raise ValueError('0 occured in dispersion curve, meaning velocity model for FMM is not valid.')
+
+            # 2. transpose dispersion curve to get 2D phase/group velocity maps
+            disp_curve = disp_curve.reshape(m, self.npoints, -1).transpose(0, 2, 1).reshape(-1, self.npoints)
+            # disp_curve now has a shape of (m * nperiods, npoints)
+
+            # 3. calculate travel time data using fast marching method
+            total_periods = m * len(self.periods)
+            log_like = np.zeros(total_periods)      # shape of (m * nperiods,)
+            traveltime = np.zeros([total_periods, self.data.shape[1]])      # shape of (m * nperiods,)
+            with Pool(processes = self.num_processes) as pool:
+                results = pool.starmap(self.fmm2d, [(i % len(self.periods), disp_curve[i]) for i in range(total_periods)])
+            for i in range(total_periods):
+                log_like[i] = results[i][0]
+                traveltime[i] = results[i][1]
+
+        return log_like.reshape(m, -1), traveltime.reshape(m, len(self.periods), self.data.shape[1])
 
     def solver3D(self, x):
         '''
@@ -335,7 +396,7 @@ class Posterior3D_tt():
             log_like = np.zeros(total_periods)      # shape of (m * nperiods,)
             grad_cg = np.zeros(disp_curve.shape)    # shape of (m * nperiods, npoints)
             with Pool(processes = self.num_processes) as pool:
-                results = pool.starmap(self.fmm2d, [(i % len(self.periods), disp_curve[i]) for i in range(total_periods)])
+                results = pool.starmap(self.fmm2d_loglike, [(i % len(self.periods), disp_curve[i]) for i in range(total_periods)])
             for i in range(total_periods):
                 log_like[i] = results[i][0]
                 grad_cg[i] = results[i][1]
