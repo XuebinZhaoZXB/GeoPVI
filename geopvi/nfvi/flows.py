@@ -11,7 +11,7 @@ from geopvi.nfvi.utils import MaskedNN, MLP, CNN1D, unconstrained_RQS, Triangula
 """
 The field of normalising flows is developing very fast, in this package 
 we just implemented several flows that are tested to be effective as of 2020 in our GJI paper.
-Feel free to add new flows that you think is useful!
+Feel free to add new flows that you think are useful!
 """
 
 
