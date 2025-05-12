@@ -45,9 +45,24 @@ class ForwardModel(Function):
 
 #     return d_syn, gradient
 
-
 def forward_sw(vel, periods, thick, vp_vs = 1.76, relative_step = 0.005, wave = 'love', mode = 1, 
                        velocity = 'group', requires_grad = True, lower = None, upper = None):
+    """
+    This forward function is used to calculate the dispersion curve and its gradient
+    The calculation of Love wave group velocity is sometimes numerically unstable.
+    When such cases happen, the function will perturb the input Vs model by a small amount (relative_step)
+    to ensure numerical stability.
+    Args:
+        vel: 1D array representing the S-wave velocity profile (nlayer,)
+        periods: 1D array representing the period of each frequency
+        thick: thickness of each layer (n,): 1D array representing the thickness of each layer
+        vp_vs: ratio of P-wave velocity to S-wave velocity (float)
+        relative_step: relative step size for gradient calculation (float)
+        wave: type of modelled wave (str): 'rayleigh' or 'love' representing joint inversion of Rayleigh and Love waves
+        mode: mode of modelled wave (int): representing fundamental or higher mode
+        velocity: type of modelled dispersion data (str): 'phase' or 'group' representing phase or group velocity
+        requires_grad: whether to calculate the gradient (bool)
+    """
     vs = vel.copy()
     perturb = relative_step
     while True:
