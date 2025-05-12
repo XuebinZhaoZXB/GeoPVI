@@ -118,4 +118,5 @@ References
 - Zhao, X., & Curtis, A. (2024). Physically Structured Variational Inference for Bayesian Full Waveform Inversion. Journal of Geophysical Research: Solid Earth, 129(11), e2024JB029557.
 - Zhao, X., & Curtis, A. (2024). Variational prior replacement in Bayesian inference and inversion. Geophysical Journal International, 239 (2), 1236-1256.
 - Zhao, X., & Curtis, A. (2024). Efficient Bayesian Full Waveform Inversion and Analysis of Prior Hypotheses in 3D, arXiv preprint arXiv:2409.09746.
+- Zhao, X., & Curtis, A. (2024). GeoPVI: a Python Package for Geoscientific Inversion using Parametric Variational Inference, EIP Report 63.
 - Zhao, X., Irvin, L., Galetti, E., & Curtis, A. (2025). Bayesian Surface Wave Inversion of the British Isles: Comparing 3D Variational Inversion and 1D Monte Carlo Inversion. In preparation.
