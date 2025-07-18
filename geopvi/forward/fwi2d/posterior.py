@@ -62,7 +62,7 @@ def prepare_fwi_parameters(paramfile, config):
         f.write(config.get('FWI','dz')+'\n')
         f.write('--Time step (dt)\n')
         f.write(config.get('FWI','dt')+'\n')
-        f.write('--Donimate frequency (f0)\n')
+        f.write('--Dominant frequency (f0)\n')
         f.write(config.get('FWI','f0')+'\n')
 
     return
