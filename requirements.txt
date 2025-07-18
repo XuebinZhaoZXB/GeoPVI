@@ -3,3 +3,4 @@ torch
 cython
 dask
 scipy
+git+https://github.com/XuebinZhaoZXB/pysurf96
