@@ -113,6 +113,7 @@ Examples
 References
 ----------
 - Zhao, X., Curtis, A. & Zhang, X. (2022). Bayesian seismic tomography using normalizing flows. Geophysical Journal International, 228 (1), 213-239.
-- Zhao, X., & Curtis, A. (2024). Bayesian inversion, uncertainty analysis and interrogation using boosting variational inference. Journal of Geophysical Research: Solid Earth 129 (1), e2023JB027789
-- Zhao, X., & Curtis, A. (2024). Physically Structured Variational Inference for Bayesian Full Waveform Inversion. ESS Open archive.
+- Zhao, X., & Curtis, A. (2024). Bayesian inversion, uncertainty analysis and interrogation using boosting variational inference. Journal of Geophysical Research: Solid Earth 129 (1), e2023JB027789.
+- Zhao, X., & Curtis, A. (2024). Physically Structured Variational Inference for Bayesian Full Waveform Inversion. Journal of Geophysical Research: Solid Earth 129 (11), e2024JB029557.
 - Zhao, X., & Curtis, A. (2024). Variational prior replacement in Bayesian inference and inversion. Geophysical Journal International, 239 (2), 1236-1256.
+- Zhao, X., & Curtis, A. (2025). Efficient Bayesian Full Waveform Inversion and Analysis of Prior Hypotheses in 3D. Geophysics, 90 (6).
