@@ -56,7 +56,7 @@ contains
     subroutine fm2d_ray(nsrc,srcx,srcy, &
         nrec, recx, recy, mask, &
         nx, ny, xmin, ymin, dx, dy, &
-        gdx, gdy, sdx, sext, vel, time, dtdv, rayx,rayy)
+        gdx, gdy, sdx, sext, vel, time, dtdv, rayx,rayy,earth)
         use m_fm2d, only : modrays, T_RAY
         integer(c_int), intent(in) :: nsrc
         real(kind=c_double), dimension(:), intent(in) :: srcx
@@ -75,8 +75,9 @@ contains
         real(kind=c_double), dimension(:,:,:,:), intent(out) :: dtdv
         real(kind=c_double), dimension(:,:), intent(out) :: rayx
         real(kind=c_double), dimension(:,:), intent(out) :: rayy
+        real(kind=c_double), intent(in) :: earth
 
-        real(kind=c_double), parameter :: earth = 6371
+        ! real(kind=c_double), parameter :: earth = 6371
         integer :: crazyray
         type(T_RAY), dimension(:),allocatable :: rays
         real(kind=c_double) :: band
@@ -110,7 +111,7 @@ contains
 
 
     subroutine c_fm2d_ray(nsrc,srcx,srcy,nrec,recx,recy,nx,ny,mask,&
-        xmin,ymin,dx,dy,gdx,gdy,sdx, sext, vel,time,dtdv,rayx,rayy) bind(c)
+        xmin,ymin,dx,dy,gdx,gdy,sdx, sext, vel,time,dtdv,rayx,rayy,earth) bind(c)
     integer(c_int), intent(in) :: nsrc
     real(kind=c_double), intent(in) :: srcx(nsrc)
     real(kind=c_double), intent(in) :: srcy(nsrc)
@@ -128,10 +129,11 @@ contains
     real(kind=c_double), intent(out) :: dtdv(ny,nx,nrec,nsrc)
     real(kind=c_double), intent(out) :: rayx(((ny-1)*gdy+1)*((nx-1)*gdx+1),nrec*nsrc)
     real(kind=c_double), intent(out) :: rayy(((ny-1)*gdy+1)*((nx-1)*gdx+1),nrec*nsrc)
+    real(kind=c_double), intent(in) :: earth
 
     call fm2d_ray(nsrc,srcx,srcy,nrec,recx,recy,mask,&
         nx,ny,xmin,ymin,dx,dy,gdx,gdy,sdx, sext, vel,&
-        time,dtdv,rayx,rayy)
+        time,dtdv,rayx,rayy,earth)
 
     end subroutine
 
