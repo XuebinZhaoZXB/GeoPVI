@@ -1466,30 +1466,30 @@ DO i=1,nrc
 !
 !  Write ray paths to output file
 !
-   !IF(uar == 0 .or. wrgf.EQ.csid.OR.wrgf.LT.0)THEN
-   !   if(.not. allocated(pnpts) )ALLOCATE(pnpts(1,2))
-   !	  ALLOCATE(praypts(2,nrp))
-   !   !WRITE(40)nrp
-   !   totpts=totpts+nrp
-   !   pnpts(1,1)=nrp
-   !   pnpts(1,2)=srsv(i,csid)
-   !   DO j=1,nrp
-   !   	 rayx=rgx(j)
-   !      rayz=rgz(j)
-   !      praypts(1,j)=rayx
-   !      praypts(2,j)=rayz
-   !      !WRITE(40)rayx,rayz
-   !   ENDDO
-   !   
-   !   !write(*,*) i, csid, srsv(i,csid), pnpts(1,2)
-   !   !allocate( rays(pnpts(1,2))%points(2,nrp) )
-   !   !rays(pnpts(1,2))%npoints = nrp
-   !   !rays(pnpts(1,2))%points = praypts
-   !   !rays(pnpts(1,2))%srcid = csid
-   !   !rays(pnpts(1,2))%revid = i
-   !   !deallocate( pnpts )
-   !   deallocate( praypts )
-   !ENDIF
+   IF(uar == 0 .or. wrgf.EQ.csid.OR.wrgf.LT.0)THEN
+     if(.not. allocated(pnpts) )ALLOCATE(pnpts(1,2))
+   	  ALLOCATE(praypts(2,nrp))
+     !WRITE(40)nrp
+     totpts=totpts+nrp
+     pnpts(1,1)=nrp
+     pnpts(1,2)=srsv(i,csid)
+     DO j=1,nrp
+     	 rayx=rgx(j)
+        rayz=rgz(j)
+        praypts(1,j)=rayx
+        praypts(2,j)=rayz
+        !WRITE(40)rayx,rayz
+     ENDDO
+     
+     !write(*,*) i, csid, srsv(i,csid), pnpts(1,2)
+     allocate( rays(pnpts(1,2))%points(2,nrp) )
+     rays(pnpts(1,2))%npoints = nrp
+     rays(pnpts(1,2))%points = praypts
+     rays(pnpts(1,2))%srcid = csid
+     rays(pnpts(1,2))%revid = i
+     deallocate( pnpts )
+     deallocate( praypts )
+   ENDIF
    
 !
 !  Write partial derivatives to output file
