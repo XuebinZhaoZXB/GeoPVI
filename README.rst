@@ -104,7 +104,7 @@ Examples
 - For a complete 2D full waveform inversion example, please see the example in ``examples/fwi2d``. 
 - For a complete 3D surface wave inversion, please see the example in ``examples/swi3d``. 
 - For a complete example of performing **variational prior replacement (VPR)** to update prior information post Bayesian inversion, please see the example in ``examples/fwi2d_vpr``. 
-  In this example, a Uniform prior probability distribution is replaced by a smoothed version of the Uniform prior pdf, with almost zero additional computational cost.
+  In this example, a uniform prior probability distribution is replaced by a smoothed version of the uniform prior pdf, with almost zero additional computational cost.
 - For an example implementation of 3D full waveform inversion, please see the example in ``examples/fwi3d``. Note
   that this requires users to provide an external 3D FWI code to calculate misfit values and gradients. See details
   in ``geopvi/fwi3d``.
@@ -117,4 +117,4 @@ References
 - Zhao, X., & Curtis, A. (2024). Bayesian inversion, uncertainty analysis and interrogation using boosting variational inference. Journal of Geophysical Research: Solid Earth 129 (1), e2023JB027789.
 - Zhao, X., & Curtis, A. (2024). Physically Structured Variational Inference for Bayesian Full Waveform Inversion. Journal of Geophysical Research: Solid Earth 129 (11), e2024JB029557.
 - Zhao, X., & Curtis, A. (2024). Variational prior replacement in Bayesian inference and inversion. Geophysical Journal International, 239 (2), 1236-1256.
-- Zhao, X., & Curtis, A. (2025). Efficient Bayesian Full Waveform Inversion and Analysis of Prior Hypotheses in 3D. Geophysics, 90 (6).
+- Zhao, X., & Curtis, A. (2025). Efficient Bayesian Full Waveform Inversion and Analysis of Prior Hypotheses in 3D. Geophysics, 90 (6), R373-R388.
