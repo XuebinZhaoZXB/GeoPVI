@@ -63,7 +63,7 @@ class GaussianComponent():
                 if np.isscalar(lower):
                     lower = np.full((dim,), lower)
                 self.lower = torch.from_numpy(lower)
-        if kernel == 'strucutred':
+        if kernel == 'structured':
             if mask is None:
                 self.mask = np.ones([1, dim])
                 self.mask[0, -1] = 0.
