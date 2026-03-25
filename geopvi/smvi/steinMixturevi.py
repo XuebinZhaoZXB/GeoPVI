@@ -20,8 +20,6 @@ class SteinMixture():
         self.component = componentDistribution
         self.num_component = num_component
 
-        self.params = torch.zeros((num_component, 2*ndim)) # components' parameters
-
     def grad_elbo(self, param_numpy, nsamples = 10, chunks = None):
         '''
         Calculate the gradient of ELBO for the mixture distribution
@@ -60,6 +58,7 @@ class SteinMixture():
         samples = self.component.sample_from_base(nsamples)
         # Second, forward pass of component distribution to get model samples and its probability value log_gt
         samples, logq = self.component.log_prob(param, samples, chunks)
+        # samples: ncomponents * nsamples * dim, logq: ncomponents * nsamples
 
         # Third, compute log posterior probability values for model samples by performing forward evaluation
         logp = self.log_posterior(samples.reshape(self.num_component * nsamples, self.component.dim))
