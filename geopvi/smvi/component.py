@@ -37,7 +37,7 @@ class GaussianComponent():
     '''
     Define a Gaussian component distribution for Stein Mixture Variational Inference (SMVI)
     '''
-    def __init__(self, dim, kernel = 'diagonal', mask = None, base = 'Normal', 
+    def __init__(self, dim, kernel = 'diagonal', mask = None, base = 'Normal', std_type = 1,
                         constrained = False, lower = None, upper = None):
         '''
         Input:
@@ -54,6 +54,7 @@ class GaussianComponent():
         '''
         self.dim = dim
         self.kernel = kernel
+        self.std_type = std_type
         if base == 'Uniform' or base == 'Normal':
             self.base = base
         else:
@@ -107,6 +108,67 @@ class GaussianComponent():
         elif self.base == 'Uniform':
             return torch.rand(nsamples, self.dim)
 
+    def log_prob2(self, param, x, chunks = None):
+        '''
+        Calculate the log probability value for samples x under the Gaussian component with parameter param
+        The difference between this function and log_prob is that this function calculates the log probability value 
+        within the real space, rather than constrained space
+        Input:
+            param: parameters for a Gaussian component
+            x: samples drawn from base distribution, with shape (ncomponents, nsamples, dim)
+            chunks: chunk size used to calculate mixture density for all samples, 
+                    if None, then calculate all samples together; otherwise, calculate in chunks to save memory
+        Output:
+            z: transformed samples given each component's parameter, with shape (ncomponents, nsamples, dim)
+            log_prob: log probability values of mixture density for sample z, with shape (ncomponents, nsamples)
+        '''
+        n_components = param.shape[0]
+        # First, transfrom x based on component parameters to get samples distributed according to each component distribution
+        if self.base == 'Uniform':
+            x, _ = const_2_real(x, lower = 0, upper = 1)
+
+        if self.kernel == 'fullrank':
+            pass
+        elif self.kernel == 'structured':
+            pass
+        elif self.kernel == 'diagonal':
+            mus = param[:, :self.dim].unsqueeze(1)    # ncomponents * 1 * dim
+            if self.std_type == 1:
+                stds = torch.log(torch.exp(param[:, self.dim:2*self.dim]) + 1).unsqueeze(1)    # ncomponents * 1 * dim
+            elif self.std_type == 2:
+                stds = torch.exp(param[:, self.dim:2*self.dim]).unsqueeze(1)    # ncomponents * 1 * dim
+            x = mus + x * stds  # ncomponents * nsamples * dim
+        
+        # Second, calculate log probability values for each sample under different component distributions
+        # such that log probability values for the mixture distribution can be calculated
+        if self.kernel == 'fullrank':
+            pass
+        elif self.kernel == 'structured':
+            pass
+        elif self.kernel == 'diagonal':
+            '''TODO: chunk the number of samples to save memory'''
+            theta = (x - mus.unsqueeze(1)) / stds.unsqueeze(1)   # ncomponents * ncomponents * nsamples * dim
+        lg2 = - torch.log(stds.unsqueeze(1)).sum(axis = -1)     # ncomponents * 1 * 1
+
+        if self.base == 'Uniform':
+            _, lg3 = real_2_const(theta, lower = 0, upper = 1)   # ncomponents * ncomponents * nsamples
+            log_base = 0.
+        elif self.base == 'Normal':
+            lg3 = torch.zeros_like(lg2)
+            log_base = - 0.5 * self.dim * np.log(2*np.pi) - 0.5 * (theta**2).sum(axis = -1)   # ncomponents * ncomponents * nsamples
+
+        # If the component distribution is defined on a constrained space, transform the samples back to the constrained space
+        lg1 = torch.zeros([n_components, x.shape[1]])   # ncomponents * nsamples
+        if self.constrained:
+            x, lg1 = real_2_const(x, lower = self.lower, upper = self.upper)    
+            # x: ncomponents * nsamples * dim, lg1: ncomponents * nsamples
+            # lg1 = lg1.unsqueeze(0)    # 1 * ncomponents * nsamples
+        
+        log_gt = log_base + (lg2 + lg3)   # ncomponents * ncomponents * nsamples
+        log_q = torch.logsumexp(log_gt, dim = 0) - np.log(n_components)   # ncomponents * nsamples
+
+        return x, log_q, lg1
+
     def log_prob(self, param, x, chunks = None):
         '''
         Calculate the log probability value for samples x under the Gaussian component with parameter param
@@ -130,8 +192,11 @@ class GaussianComponent():
             pass
         elif self.kernel == 'diagonal':
             mus = param[:, :self.dim].unsqueeze(1)    # ncomponents * 1 * dim
+            if self.std_type == 1:
+                stds = torch.log(torch.exp(param[:, self.dim:2*self.dim]) + 1).unsqueeze(1)    # ncomponents * 1 * dim
+            elif self.std_type == 2:    
+                stds = torch.exp(param[:, self.dim:2*self.dim]).unsqueeze(1)    # ncomponents * 1 * dim
             # stds = torch.exp(param[:, self.dim:2*self.dim]).unsqueeze(1)    # ncomponents * 1 * dim
-            stds = torch.log(torch.exp(param[:, self.dim:2*self.dim]) + 1).unsqueeze(1)    # ncomponents * 1 * dim
             x = mus + x * stds  # ncomponents * nsamples * dim
         
         # Second, calculate log probability values for each sample under different component distributions
@@ -143,7 +208,7 @@ class GaussianComponent():
         elif self.kernel == 'diagonal':
             '''TODO: chunk the number of samples to save memory'''
             theta = (x - mus.unsqueeze(1)) / stds.unsqueeze(1)   # ncomponents * ncomponents * nsamples * dim
-        lg2 = - torch.log(stds).sum(axis = -1)     # ncomponents * 1 * 1
+        lg2 = - torch.log(stds.unsqueeze(1)).sum(axis = -1)     # ncomponents * 1 * 1
 
         if self.base == 'Uniform':
             _, lg3 = real_2_const(theta, lower = 0, upper = 1)   # ncomponents * ncomponents * nsamples
@@ -155,7 +220,8 @@ class GaussianComponent():
         # If the component distribution is defined on a constrained space, transform the samples back to the constrained space
         lg1 = torch.zeros_like(lg2)
         if self.constrained:
-            x, lg1 = real_2_const(x, lower = self.lower, upper = self.upper)    # ncomponents * nsamples * dim, lg1: ncomponents * nsamples
+            x, lg1 = real_2_const(x, lower = self.lower, upper = self.upper)    
+            # x: ncomponents * nsamples * dim, lg1: ncomponents * nsamples
             lg1 = lg1.unsqueeze(0)    # 1 * ncomponents * nsamples
         
         log_gt = log_base + (lg1 + lg2 + lg3)   # ncomponents * ncomponents * nsamples
