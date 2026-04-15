@@ -3,6 +3,11 @@ import numpy as np
 
 
 def real_2_const(x, lower = None, upper = None):
+    if lower is not None:
+        lower = torch.as_tensor(lower, dtype=x.dtype, device=x.device)
+    if upper is not None:
+        upper = torch.as_tensor(upper, dtype=x.dtype, device=x.device)
+
     if lower is None and upper is None:
         z = x
         log_det = 0
@@ -14,10 +19,15 @@ def real_2_const(x, lower = None, upper = None):
         log_det = x.sum(axis = -1)
     else:    
         z = lower + (upper - lower) / (1 + torch.exp(-x))
-        log_det = (np.log(upper - lower) - x - 2 * torch.log(1 + torch.exp(-x))).sum(axis = -1)
+        log_det = (torch.log(upper - lower) - x - 2 * torch.log(1 + torch.exp(-x))).sum(axis = -1)
     return z, log_det
     
 def const_2_real(x, lower = None, upper = None):
+    if lower is not None:
+        lower = torch.as_tensor(lower, dtype=x.dtype, device=x.device)
+    if upper is not None:
+        upper = torch.as_tensor(upper, dtype=x.dtype, device=x.device)
+
     if lower is None and upper is None:
         z = x
         log_det = 0
@@ -127,16 +137,17 @@ class GaussianComponent():
         if self.base == 'Uniform':
             x, _ = const_2_real(x, lower = 0, upper = 1)
 
+        mus = param[:, :self.dim].unsqueeze(1)    # ncomponents * 1 * dim
+        if self.std_type == 1:
+            stds = torch.log(torch.exp(param[:, self.dim:2*self.dim]) + 1).unsqueeze(1)    # ncomponents * 1 * dim
+        elif self.std_type == 2:
+            stds = torch.exp(param[:, self.dim:2*self.dim]).unsqueeze(1)    # ncomponents * 1 * dim
+
         if self.kernel == 'fullrank':
             pass
         elif self.kernel == 'structured':
-            pass
+            non_diag = param[:, 2 * self.dim:].unsqueeze(1)    # ncomponents * 1 * num_non_diag
         elif self.kernel == 'diagonal':
-            mus = param[:, :self.dim].unsqueeze(1)    # ncomponents * 1 * dim
-            if self.std_type == 1:
-                stds = torch.log(torch.exp(param[:, self.dim:2*self.dim]) + 1).unsqueeze(1)    # ncomponents * 1 * dim
-            elif self.std_type == 2:
-                stds = torch.exp(param[:, self.dim:2*self.dim]).unsqueeze(1)    # ncomponents * 1 * dim
             x = mus + x * stds  # ncomponents * nsamples * dim
         
         # Second, calculate log probability values for each sample under different component distributions
@@ -186,17 +197,17 @@ class GaussianComponent():
         if self.base == 'Uniform':
             x, _ = const_2_real(x, lower = 0, upper = 1)
 
+        mus = param[:, :self.dim].unsqueeze(1)    # ncomponents * 1 * dim
+        if self.std_type == 1:
+            stds = torch.log(torch.exp(param[:, self.dim:2*self.dim]) + 1).unsqueeze(1)    # ncomponents * 1 * dim
+        elif self.std_type == 2:
+            stds = torch.exp(param[:, self.dim:2*self.dim]).unsqueeze(1)    # ncomponents * 1 * dim
+
         if self.kernel == 'fullrank':
             pass
         elif self.kernel == 'structured':
-            pass
+            non_diag = param[:, 2 * self.dim:].unsqueeze(1)    # ncomponents * 1 * num_non_diag
         elif self.kernel == 'diagonal':
-            mus = param[:, :self.dim].unsqueeze(1)    # ncomponents * 1 * dim
-            if self.std_type == 1:
-                stds = torch.log(torch.exp(param[:, self.dim:2*self.dim]) + 1).unsqueeze(1)    # ncomponents * 1 * dim
-            elif self.std_type == 2:    
-                stds = torch.exp(param[:, self.dim:2*self.dim]).unsqueeze(1)    # ncomponents * 1 * dim
-            # stds = torch.exp(param[:, self.dim:2*self.dim]).unsqueeze(1)    # ncomponents * 1 * dim
             x = mus + x * stds  # ncomponents * nsamples * dim
         
         # Second, calculate log probability values for each sample under different component distributions
@@ -218,28 +229,15 @@ class GaussianComponent():
             log_base = - 0.5 * self.dim * np.log(2*np.pi) - 0.5 * (theta**2).sum(axis = -1)   # ncomponents * ncomponents * nsamples
 
         # If the component distribution is defined on a constrained space, transform the samples back to the constrained space
-        lg1 = torch.zeros_like(lg2)
         if self.constrained:
-            x, lg1 = real_2_const(x, lower = self.lower, upper = self.upper)    
+            x, lg1 = real_2_const(x, lower = self.lower, upper = self.upper)
             # x: ncomponents * nsamples * dim, lg1: ncomponents * nsamples
-            lg1 = lg1.unsqueeze(0)    # 1 * ncomponents * nsamples
+            lg1 = - lg1.unsqueeze(0)    # 1 * ncomponents * nsamples
+        else:
+            lg1 = torch.zeros(x.shape[0], x.shape[1])  # (ncomponents, nsamples)
         
         log_gt = log_base + (lg1 + lg2 + lg3)   # ncomponents * ncomponents * nsamples
-        log_q = torch.logsumexp(log_gt, dim = 0) - np.log(n_components)   # ncomponents * nsamples
+        log_q = torch.logsumexp(log_gt - torch.log(torch.tensor(n_components)), dim = 0)   # ncomponents * nsamples
 
         return x, log_q
 
-    def unflatten(self, params):
-        params = self._atleast_2d(params)
-        # first d params are mu values
-        mus = params[:, :self.dim]
-        # following params define the covariance matrix
-        # covariances = params[:, self.dim:]
-        # covariances[:, :self.dim] = torch.exp(params[:, self.dim:2*self.dim])
-        # stds = torch.exp(params[:, self.dim:2*self.dim])
-        stds = torch.log(torch.exp(params[:, self.dim:2*self.dim]) + 1)
-        non_diags = params[:, 2 * self.dim:]
-        # covariance = torch.cat([torch.exp(params[:, self.dim:2*self.dim]), params[:, 2*self.dim:]], dim = 1)
-        if self.kernel != 'diagonal':
-            return {"mus": mus, "stds": stds, 'off_diags': non_diags}
-        return {"mus": mus, "stds": stds}

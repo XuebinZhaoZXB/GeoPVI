@@ -51,7 +51,8 @@ class SteinMixture():
         '''
         Calculate the ELBO value for the mixture distribution
         The difference between this function and self._elbo is that this function calculate the ELBO value using 
-        different sampeles from each component distribution
+        component.log_prob2, which assumes the component is defined within the real space 
+        and thus includes the log determinant term for the transformation from real number (unconstrained) space to constrained space
         Input:
             param: parameters for each component distribution, with shape (num_component, num_parameters)
             nsamples: number of samples to use for Monte Carlo integration to estimate the ELBO value
@@ -98,47 +99,3 @@ class SteinMixture():
         elbo = (logp - logq).mean(dim = -1)
 
         return elbo
-
-    def _get_mixture(self, loss = None):
-        # get the unflattened params and weights
-        output = self.component_dist.unflatten(self.params)
-        output.update([('weights', self.weights)])
-        if loss is not None:
-            output.update([('losses', loss)])
-        return output
-    
-    def sample(self, nsamples, component = -1):        
-        '''
-        Sample from the obtained mixture models or specific components
-        Argument
-            nsmaples:   total number of samples to be drawn
-            component:  indicator stating samples are drawn from which component
-                        int or np.ndarray or list
-                        if int: -1 means sample from all components - that is sample from the BVI model
-                                otherwise should be in [0, self.N) means which component to be sampled 
-                                (0 means the 1st, 1 means 2nd, and so on)
-                        if np.ndarray / list: sample from listed components
-        Return
-            Posterior samples
-        '''
-        if isinstance(component, np.ndarray) or isinstance(component, list):
-            component_index = component
-        elif isinstance(component, int):
-            if component == -1:
-                component_index = np.arange(self.N)
-            elif 0 <= component < self.N:
-                component_index = [component]
-            else:
-                raise ValueError('Component should be a numpy.ndarray with integer elements or an integer from -1 to self.N - 1')
-        else:
-            raise ValueError('Component should be a numpy.ndarray with integer elements or an integer from -1 to self.N - 1')
-
-        samples = np.empty([0, self.component_dist.dim])
-        probs = (self.weights[component_index] / self.weights[component_index].sum()).numpy()
-        k = np.random.choice(component_index, size = nsamples, p = probs)
-        for i in component_index:
-            nsamples_i = (k == i).sum()
-            samples_i = self.component_dist.sample_from_base(nsamples_i)
-            samples_i, _ = self.component_dist.log_prob_gt(self.params[i], samples_i)
-            samples = np.vstack([samples, samples_i.data.numpy()])
-        return samples
