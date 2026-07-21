@@ -5,7 +5,8 @@ import numpy
 from os import system
 npy_include_dir = numpy.get_include()
 
-ext_modules = [Extension("aco2d", ["pyacofwi2D.pyx", "fdtd2D_modelling.c"],
+ext_modules = [Extension("aco2d", ["pyacofwi2D.pyx", "fdtd2D_modelling.c",
+                                    "vdacoustic2D_modelling.c"],
                          include_dirs = [npy_include_dir],
                          language='c',
                          extra_compile_args=["-fopenmp"],
