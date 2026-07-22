@@ -51,6 +51,7 @@ examples/swi3d/input/stimes.dat
 
 # Compiled python modules.
 *.pyc
+.nfs*
 
 # Setuptools distribution folder.
 /dist/

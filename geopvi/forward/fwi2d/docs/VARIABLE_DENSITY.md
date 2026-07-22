@@ -237,7 +237,7 @@ The variable-density call returns both velocity and density gradients and was
 
 ## Reproducible example
 
-See `examples/fwi2d_variable_density/variable_density_demo.py`.  It generates
+See `../demos/variable_density_demo.py`.  It generates
 a small layered velocity/density model in memory, models observed pressure,
 evaluates a uniform starting model, and writes synthetic data and both
 gradients to an ignored `output/` directory.

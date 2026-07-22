@@ -15,8 +15,7 @@ import numpy as np
 
 
 HERE = Path(__file__).resolve().parent
-ROOT = HERE.parents[1]
-FWI2D = ROOT / "geopvi" / "forward" / "fwi2d"
+FWI2D = HERE.parent
 NZ, NX, NT, NS, NR = 110, 250, 2000, 5, 250
 
 

@@ -9,20 +9,19 @@ import numpy as np
 
 
 HERE = Path(__file__).resolve().parent
-ROOT = HERE.parents[1]
-PARAMETERS = HERE / "input" / "input_params.txt"
+PARAMETERS = HERE / "input" / "variable_density_params.txt"
 NZ, NX, NT, NS, NR = 51, 81, 400, 1, 81
 
 
 def load_extension():
     """Import the in-place extension and give a useful build error."""
-    sys.path.insert(0, str(ROOT))
+    module_dir = HERE.parent
+    sys.path.insert(0, str(module_dir))
     try:
-        from geopvi.forward.fwi2d import aco2d
+        import aco2d
     except ImportError as error:
-        build_dir = ROOT / "geopvi" / "forward" / "fwi2d"
         raise RuntimeError(
-            f"Build aco2d first: cd {build_dir} && "
+            f"Build aco2d first: cd {module_dir} && "
             "python setup.py build_ext --inplace"
         ) from error
     return aco2d
