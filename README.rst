@@ -103,7 +103,10 @@ For comprehensive guides and examples on using GeoPVI, please check out GeoPVI u
 Examples
 ---------
 - For a complete 2D travel time tomography example, please see the example in ``examples/tomo2d``. 
-- For a complete 2D full waveform inversion example, please see the example in ``examples/fwi2d``. 
+- For a complete 2D full waveform inversion example, please see the example in ``examples/fwi2d``.
+- For the variable-density 2D acoustic forward and velocity/density-gradient
+  interface, see ``examples/fwi2d_variable_density`` and
+  ``geopvi/forward/fwi2d/VARIABLE_DENSITY.md``.
 - For a complete 3D surface wave inversion, please see the example in ``examples/swi3d``. 
 - For a complete example of performing **variational prior replacement (VPR)** to update prior information post Bayesian inversion, please see the example in ``examples/fwi2d_vpr``. 
   In this example, a uniform prior probability distribution is replaced by a smoothed version of the uniform prior pdf, with almost zero additional computational cost.
