@@ -14,6 +14,11 @@ cdef extern from "pyacofwi2D.h":
     void vd_spatial_operator_2D(int nx, int nz, int lc, float dx, float dz,
                                 const float *rho_inner, const float *pressure_inner,
                                 float *operator_inner)
+    void vd_wavefield_snapshots_2D(char input_file[200], const float *vel_inner,
+                                   const float *rho_inner, float *record_syn,
+                                   const float *record_obs, int snapshot_count,
+                                   const int *snapshot_steps, float *forward_snapshots,
+                                   float *adjoint_snapshots, int verbose)
 
 
 def _require_finite_difference(paramfile):
@@ -203,3 +208,33 @@ def variable_density_spatial_operator(np.ndarray[double, ndim=1, mode="c"] rho n
     cdef np.ndarray[float, ndim=1, mode="c"] operator_f = np.zeros(nx * nz, dtype=np.float32)
     vd_spatial_operator_2D(nx, nz, lc, dx, dz, &rho_f[0], &pressure_f[0], &operator_f[0])
     return operator_f
+
+
+def variable_density_wavefield_snapshots(np.ndarray[double, ndim=1, mode="c"] vel not None,
+                                         np.ndarray[double, ndim=1, mode="c"] rho not None,
+                                         np.ndarray[float, ndim=1, mode="c"] record_obs not None,
+                                         np.ndarray[np.int32_t, ndim=1, mode="c"] snapshot_steps not None,
+                                         paramfile="./input/input_param.txt", verbose=0):
+    """Return synthetic data plus physical-grid forward/adjoint snapshots.
+
+    This is a diagnostic interface.  Snapshot indices are zero-based time-step
+    indices and the current implementation supports a single source.
+    """
+    model_size, data_size = _variable_density_sizes(paramfile)
+    if vel.shape[0] != model_size or rho.shape[0] != model_size:
+        raise ValueError("velocity and density length must equal nx*nz")
+    if record_obs.shape[0] != data_size:
+        raise ValueError("record_obs length must equal ns*nt*nr")
+    if snapshot_steps.shape[0] == 0:
+        raise ValueError("snapshot_steps must not be empty")
+    if np.any(vel <= 0.0) or np.any(rho <= 0.0):
+        raise ValueError("velocity and density must be strictly positive")
+    cdef np.ndarray[float, ndim=1, mode="c"] vel_f = np.asarray(vel, dtype=np.float32)
+    cdef np.ndarray[float, ndim=1, mode="c"] rho_f = np.asarray(rho, dtype=np.float32)
+    cdef np.ndarray[float, ndim=1, mode="c"] synthetic = np.zeros(data_size, dtype=np.float32)
+    cdef np.ndarray[float, ndim=1, mode="c"] forward = np.zeros(snapshot_steps.shape[0] * model_size, dtype=np.float32)
+    cdef np.ndarray[float, ndim=1, mode="c"] adjoint = np.zeros(snapshot_steps.shape[0] * model_size, dtype=np.float32)
+    vd_wavefield_snapshots_2D(str.encode(paramfile), &vel_f[0], &rho_f[0], &synthetic[0],
+                              &record_obs[0], snapshot_steps.shape[0], <const int*>&snapshot_steps[0],
+                              &forward[0], &adjoint[0], verbose)
+    return synthetic, forward.reshape((snapshot_steps.shape[0], -1)), adjoint.reshape((snapshot_steps.shape[0], -1))

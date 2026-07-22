@@ -606,3 +606,105 @@ cleanup:
     free(p0); free(p1); free(p2); free(adj0); free(adj1); free(adj2);
     free(wavelet); free(forward_p);
 }
+
+void vd_wavefield_snapshots_2D(char input_file[200], const float *vel_inner,
+                               const float *rho_inner, float *record_syn,
+                               const float *record_obs, int snapshot_count,
+                               const int *snapshot_steps, float *forward_snapshots,
+                               float *adjoint_snapshots, int verbose)
+{
+    int nx, nz, pml0, input_lc, laplace_solver, ns, nt, ds, ns0;
+    int depths, depthr, nr, dr, nr0, nt_interval;
+    int halo, pml, ntx, ntz, ntp, is, it, ir, snap;
+    float dx, dz, dt, f0, vmax;
+    float derivative[6], interpolation[6];
+    float *velocity = NULL, *density = NULL, *bulk = NULL, *buoyancy = NULL;
+    float *w = NULL, *t11 = NULL, *t12 = NULL, *t13 = NULL;
+    float *p0 = NULL, *p1 = NULL, *p2 = NULL, *wavelet = NULL;
+    float *adj0 = NULL, *adj1 = NULL, *adj2 = NULL;
+
+    read_parameters(input_file, &nx, &nz, &pml0, &input_lc, &laplace_solver,
+                    &ns, &nt, &ds, &ns0, &depths, &depthr, &nr, &dr, &nr0,
+                    &nt_interval, &dx, &dz, &dt, &f0);
+    if (!vd_validate_parameters(nx, nz, pml0, input_lc, laplace_solver, ns, nt, ds, ns0, depths,
+                                depthr, nr, dr, nr0, dx, dz, dt, f0) || ns != 1 ||
+        snapshot_count <= 0 || !snapshot_steps || !forward_snapshots || !adjoint_snapshots) return;
+    for (snap = 0; snap < snapshot_count; ++snap)
+        if (snapshot_steps[snap] < 0 || snapshot_steps[snap] >= nt) return;
+    if (!vd_staggered_coefficients(input_lc, derivative, interpolation)) return;
+    halo = 2 * input_lc;
+    pml = pml0 + halo;
+    ntx = nx + 2 * pml;
+    ntz = nz + 2 * pml;
+    ntp = ntx * ntz;
+    velocity = vd_malloc(ntp, sizeof(float), "snapshot extended velocity");
+    density = vd_malloc(ntp, sizeof(float), "snapshot extended density");
+    bulk = vd_malloc(ntp, sizeof(float), "snapshot bulk modulus");
+    buoyancy = vd_malloc(ntp, sizeof(float), "snapshot buoyancy");
+    p0 = vd_malloc(ntp, sizeof(float), "snapshot forward p0");
+    p1 = vd_malloc(ntp, sizeof(float), "snapshot forward p1");
+    p2 = vd_malloc(ntp, sizeof(float), "snapshot forward p2");
+    adj0 = vd_malloc(ntp, sizeof(float), "snapshot adjoint p0");
+    adj1 = vd_malloc(ntp, sizeof(float), "snapshot adjoint p1");
+    adj2 = vd_malloc(ntp, sizeof(float), "snapshot adjoint p2");
+    wavelet = vd_malloc(nt, sizeof(float), "snapshot Ricker wavelet");
+    if (!velocity || !density || !bulk || !buoyancy || !p0 || !p1 || !p2 || !adj0 || !adj1 || !adj2 || !wavelet) goto cleanup;
+    if (!vd_extend_models(nx, nz, pml, ntx, ntz, vel_inner, rho_inner,
+                          velocity, density, bulk, buoyancy, &vmax)) goto cleanup;
+    if (vmax * dt * sqrtf(1.0f / (dx * dx) + 1.0f / (dz * dz)) >= 1.0f) goto cleanup;
+    if (!vd_prepare_liao_abc(pml0, ntx, ntz, dt, dx, velocity, &w, &t11, &t12, &t13)) goto cleanup;
+    getrik(nt, dt, f0, wavelet);
+
+    for (is = 0; is < ns; ++is) {
+        int source_index = (pml + depths) * ntx + pml + ns0 + is * ds;
+        memset(p0, 0, (size_t)ntp * sizeof(float));
+        memset(p1, 0, (size_t)ntp * sizeof(float));
+        memset(p2, 0, (size_t)ntp * sizeof(float));
+        for (it = 0; it < nt; ++it) {
+            float *tmp;
+            vd_step(ntx, ntz, input_lc, halo, dx, dz, dt, derivative, interpolation,
+                    bulk, buoyancy, p0, p1, p2);
+            abc_for_p(ntx, ntz, halo, pml, p0, p1, p2, w, t11, t12, t13);
+            p2[source_index] += dt * dt * velocity[source_index] * velocity[source_index] * wavelet[it];
+            for (ir = 0; ir < nr; ++ir) {
+                int receiver_index = (pml + depthr) * ntx + pml + nr0 + ir * dr;
+                record_syn[(size_t)it * nr + ir] = p2[receiver_index];
+            }
+            for (snap = 0; snap < snapshot_count; ++snap) if (snapshot_steps[snap] == it) {
+                int iz, ix;
+                for (iz = 0; iz < nz; ++iz)
+                    for (ix = 0; ix < nx; ++ix)
+                        forward_snapshots[(size_t)snap * nx * nz + iz * nx + ix] =
+                            p2[(iz + pml) * ntx + ix + pml];
+            }
+            tmp = p0; p0 = p1; p1 = p2; p2 = tmp;
+        }
+        memset(adj0, 0, (size_t)ntp * sizeof(float));
+        memset(adj1, 0, (size_t)ntp * sizeof(float));
+        memset(adj2, 0, (size_t)ntp * sizeof(float));
+        for (it = nt - 1; it >= 0; --it) {
+            float *tmp;
+            vd_step(ntx, ntz, input_lc, halo, dx, dz, dt, derivative, interpolation,
+                    bulk, buoyancy, adj0, adj1, adj2);
+            abc_for_p(ntx, ntz, halo, pml, adj0, adj1, adj2, w, t11, t12, t13);
+            for (ir = 0; ir < nr; ++ir) {
+                int receiver_index = (pml + depthr) * ntx + pml + nr0 + ir * dr;
+                float residual = record_syn[(size_t)it * nr + ir] - record_obs[(size_t)it * nr + ir];
+                adj2[receiver_index] += dt * dt * bulk[receiver_index] * residual;
+            }
+            for (snap = 0; snap < snapshot_count; ++snap) if (snapshot_steps[snap] == it) {
+                int iz, ix;
+                for (iz = 0; iz < nz; ++iz)
+                    for (ix = 0; ix < nx; ++ix)
+                        adjoint_snapshots[(size_t)snap * nx * nz + iz * nx + ix] =
+                            adj2[(iz + pml) * ntx + ix + pml];
+            }
+            tmp = adj0; adj0 = adj1; adj1 = adj2; adj2 = tmp;
+        }
+    }
+    if (verbose) printf("Variable-density wavefield snapshots finished.\n");
+cleanup:
+    free(velocity); free(density); free(bulk); free(buoyancy);
+    free(w); free(t11); free(t12); free(t13);
+    free(p0); free(p1); free(p2); free(adj0); free(adj1); free(adj2); free(wavelet);
+}
