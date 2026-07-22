@@ -16,9 +16,9 @@ def _load_extension():
     return module
 
 
-def _write_parameters(path):
+def _write_parameters(path, lc=3):
     values = [
-        31, 31, 8, 3, 0, 1, 150, 1, 10, 10, 10, 3, 5, 8, 1,
+        31, 31, 8, lc, 0, 1, 150, 1, 10, 10, 10, 3, 5, 8, 1,
         10.0, 10.0, 0.001, 18.0,
     ]
     with path.open("w", encoding="ascii") as stream:
@@ -141,3 +141,60 @@ def test_zero_residual_has_zero_gradients(tmp_path):
     np.testing.assert_array_equal(synthetic, observed)
     np.testing.assert_array_equal(grad_v, 0.0)
     np.testing.assert_array_equal(grad_rho, 0.0)
+
+
+def test_all_supported_lc_values_have_consistent_joint_gradients(tmp_path):
+    """Check the discrete velocity/density gradient for every stencil radius."""
+    aco2d = _load_extension()
+    nz = nx = 31
+    z, x = np.mgrid[:nz, :nx]
+    velocity = (1950.0 + 100.0 * z / (nz - 1)).astype(np.float64)
+    density = (1750.0 + 120.0 * z / (nz - 1)).astype(np.float64)
+    true_velocity = velocity + 25.0 * np.exp(-((x - 19) ** 2 + (z - 18) ** 2) / 25.0)
+    true_density = density + 35.0 * np.exp(-((x - 13) ** 2 + (z - 19) ** 2) / 22.0)
+    rng = np.random.default_rng(12)
+    direction_v = rng.normal(size=(nz, nx))
+    direction_rho = rng.normal(size=(nz, nx))
+    taper = np.zeros((nz, nx))
+    taper[7:-7, 7:-7] = 1.0
+    direction_v *= taper * 20.0 / np.sqrt(np.mean(direction_v[taper > 0] ** 2))
+    direction_rho *= taper * 20.0 / np.sqrt(np.mean(direction_rho[taper > 0] ** 2))
+
+    for lc in range(1, 7):
+        parameter_file = tmp_path / f"parameters_lc_{lc}.txt"
+        values = [
+            nx, nz, 8, lc, 0, 1, 120, 1, 15, 15, 15, 1, 1, 20, 1,
+            10.0, 10.0, 0.001, 18.0,
+        ]
+        with parameter_file.open("w", encoding="ascii") as stream:
+            for index, value in enumerate(values):
+                stream.write(f"-- parameter {index}\n{value}\n")
+        observed = aco2d.forward_variable_density(
+            true_velocity.ravel(), true_density.ravel(), dim=120,
+            paramfile=str(parameter_file)
+        ).astype(np.float32)
+        synthetic, grad_v, grad_rho = aco2d.fwi_variable_density(
+            velocity.ravel(), density.ravel(), observed,
+            paramfile=str(parameter_file)
+        )
+        assert np.all(np.isfinite(synthetic))
+        assert np.all(np.isfinite(grad_v))
+        assert np.all(np.isfinite(grad_rho))
+        adjoint_derivative = (
+            np.dot(grad_v.astype(np.float64), direction_v.ravel()) +
+            np.dot(grad_rho.astype(np.float64), direction_rho.ravel())
+        )
+        epsilon = 0.05
+        plus = _objective(
+            aco2d, (velocity + epsilon * direction_v).ravel(),
+            (density + epsilon * direction_rho).ravel(), observed, parameter_file
+        )
+        minus = _objective(
+            aco2d, (velocity - epsilon * direction_v).ravel(),
+            (density - epsilon * direction_rho).ravel(), observed, parameter_file
+        )
+        finite_difference = (plus - minus) / (2.0 * epsilon)
+        np.testing.assert_allclose(
+            adjoint_derivative, finite_difference, rtol=3.0e-2,
+            atol=1.0e-12 * max(1.0, abs(finite_difference))
+        )

@@ -7,3 +7,6 @@ void forward_vd_2D(char input_file[200], const float *vel_inner, const float *rh
 void fwi_vd_2D(char input_file[200], const float *vel_inner, const float *rho_inner,
                float *record_syn, const float *record_obs, float *grad_velocity,
                float *grad_density, const float *data_mask, int verbose);
+void vd_spatial_operator_2D(int nx, int nz, int lc, float dx, float dz,
+                            const float *rho_inner, const float *pressure_inner,
+                            float *operator_inner);
