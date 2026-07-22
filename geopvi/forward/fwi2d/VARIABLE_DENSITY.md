@@ -20,7 +20,8 @@ J=\tfrac12\|M(d_{syn}-d_{obs})\|_2^2.
 The legacy alternating-line parameter-file layout is retained.
 
 - `laplace_solver` must be `0`.  Pseudospectral modelling is not implemented
-  for the variable-density module.
+  for either acoustic module; the FFTW-dependent legacy PSM implementation is
+  not compiled.
 - `Lc` may be from `1` through `6`; it is the radius of the high-order
   staggered gradient/interpolation stencil.  `Lc=1` is second order and
   `Lc=3` is sixth order in smooth media.

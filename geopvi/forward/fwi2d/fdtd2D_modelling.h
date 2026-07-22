@@ -11,18 +11,16 @@ void getrik(int nt, float dt, float f0, float *rik);
 void forward_aco_2D(int is, int nt, int ntx, int ntz, int ntp, int nx, int nz, 
 					int Lc, int laplace_solver, int pml, int rnmax, int nt_interval,
 					float dx, float dz, float dt, float f0, float velp_max, float velpaverage, 
-					float *w, float *t11, float *t12, float *t13, float *fd, float *rik, float *velp, float * k,
+					float *w, float *t11, float *t12, float *t13, float *fd, float *rik, float *velp,
 					float *p0, float *p1, float *p2, float *psave, float *record, struct Source ss[], int run_fwi);
 void backward_aco_2D(int is, int nt, int ntx, int ntz, int ntp, int nx, int nz, 
 					int Lc, int laplace_solver, int pml, int rnmax, int nt_interval,
 					float dx, float dz, float dt, float f0, float velp_max, float velpaverage, 
-					float *w, float *t11, float *t12, float *t13, float *fd, float *rik, float *velp, float * k, 
+					float *w, float *t11, float *t12, float *t13, float *fd, float *rik, float *velp,
 					float *p0, float *p1, float *p2, float *psave, float *record,
 					float *grad, struct Source ss[], int run_fwi);
 void fdtd_2d_calculate_p(int ntx, int ntz, int Lc, int pml, float dx, float dz, float dt, 
 					float *fd, float *velp, float *p0, float *p1, float *p2);
-void pstd_2d_calculate_p(int ntx, int ntz, float dx, float dz, float dt, 
-							float *velp, float *k, float *p0, float *p1, float *p2);
 void abc_for_p(int ntx, int ntz, int Lc, int pml, float *p0, float *p1, float *p2, 
 					float *w, float *t11, float *t12, float *t13);
 void wavefield_IO(int forward_or_backward, int ntx, int ntz, int pml, int nt, int nt_interval, int it, 
@@ -41,7 +39,6 @@ void updata_p(int ntx, int ntz, float *p0, float *p1, float *p2);
 
 void wavefield_initialization(int ntx, int ntz, float *p0, float *p1, float *p2);
 void fd_coefficient(int Lc, float *fd);			
-void wavenumber(int ntx, int ntz, float dx, float dz, float *k);	
 void get_velp(int pml, int ntx, int ntz, float *vel_inner, float *velp);
 void read_parameters(char inputfile[200], int *nx, int *nz, int *pml0, int *Lc, int *laplace_slover, 
 						int *ns, int *nt, int *ds, int *ns0, 

@@ -11,7 +11,7 @@ ext_modules = [Extension("aco2d", ["pyacofwi2D.pyx", "fdtd2D_modelling.c",
                          language='c',
                          extra_compile_args=["-fopenmp"],
                          extra_link_args=["-fopenmp"],
-                         libraries=["fftw3", "m", "fftw3_threads", "fftw3_omp"],
+                         libraries=["m"],
                          #extra_objects=["fdtd2D_modelling.o"]
                          )]
 

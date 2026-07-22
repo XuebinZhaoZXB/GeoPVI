@@ -16,6 +16,20 @@ cdef extern from "pyacofwi2D.h":
                                 float *operator_inner)
 
 
+def _require_finite_difference(paramfile):
+    """Reject the retired pseudo-spectral option before entering C code."""
+    with open(paramfile, "r") as stream:
+        lines = [line.strip() for line in stream if line.strip()]
+    if len(lines) < 10:
+        raise ValueError("parameter file is incomplete")
+    try:
+        laplace_solver = int(lines[9])
+    except ValueError:
+        raise ValueError("cannot parse laplace_solver from parameter file")
+    if laplace_solver != 0:
+        raise ValueError("only laplace_solver=0 (finite difference) is supported")
+
+
 def _variable_density_sizes(paramfile):
     """Read model and data sizes from the legacy alternating-line parameter file."""
     with open(paramfile, "r") as stream:
@@ -51,6 +65,7 @@ def fwi(np.ndarray[double, ndim=1, mode="c"] vel not None,
             is_fwi = 1,
             data_mask = None,
             verbose = 0):
+    _require_finite_difference(paramfile)
     if(np.isnan(vel).any()):
         print('NaN occured in python')
         exit()
@@ -77,6 +92,7 @@ def forward(np.ndarray[double, ndim=1, mode="c"] vel not None,
             paramfile = "./input/input_param.txt",
             data_mask = None,
             verbose = 0):
+    _require_finite_difference(paramfile)
     if(np.isnan(vel).any()):
         print('NaN occured in python')
         exit()

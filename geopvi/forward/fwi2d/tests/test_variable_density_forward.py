@@ -103,6 +103,8 @@ def test_variable_density_rejects_pseudospectral_setting(tmp_path):
         aco2d.forward_variable_density(
             velocity, density, dim=240, paramfile=str(parameter_file)
         )
+    with np.testing.assert_raises_regex(ValueError, "laplace_solver=0"):
+        aco2d.forward(velocity, dim=240, paramfile=str(parameter_file))
 
 
 def test_lc_selects_a_different_finite_difference_stencil(tmp_path):
