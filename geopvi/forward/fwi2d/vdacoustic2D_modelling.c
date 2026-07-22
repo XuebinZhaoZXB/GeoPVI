@@ -214,6 +214,79 @@ static float vd_face_buoyancy_z(int ip, int ntx, int radius,
     return face_buoyancy;
 }
 
+static void vd_prepare_face_buoyancies(int ntx, int ntz, int radius,
+                                       const float *interpolation,
+                                       const float *buoyancy,
+                                       float *face_bx, float *face_bz)
+{
+    int ix, iz;
+
+    #pragma omp parallel
+    {
+        #pragma omp for collapse(2)
+        for (iz = 0; iz < ntz; ++iz)
+            for (ix = radius - 1; ix < ntx - radius; ++ix) {
+                int ip = iz * ntx + ix;
+                face_bx[ip] = vd_face_buoyancy_x(
+                    ip, radius, interpolation, buoyancy
+                );
+            }
+        #pragma omp for collapse(2)
+        for (iz = radius - 1; iz < ntz - radius; ++iz)
+            for (ix = 0; ix < ntx; ++ix) {
+                int ip = iz * ntx + ix;
+                face_bz[ip] = vd_face_buoyancy_z(
+                    ip, ntx, radius, interpolation, buoyancy
+                );
+            }
+    }
+}
+
+static void vd_compute_fluxes(int ntx, int ntz, int radius, int halo,
+                              float inv_dx, float inv_dz,
+                              const float *derivative,
+                              const float *face_bx, const float *face_bz,
+                              const float *field, float *flux_x, float *flux_z)
+{
+    int ix, iz;
+
+    #pragma omp parallel
+    {
+        #pragma omp for collapse(2)
+        for (iz = halo; iz < ntz - halo; ++iz)
+            for (ix = halo - radius; ix < ntx - halo + radius - 1; ++ix) {
+                int ip = iz * ntx + ix;
+                flux_x[ip] = face_bx[ip] * vd_face_gradient_x(
+                    ip, inv_dx, radius, derivative, field
+                );
+            }
+        #pragma omp for collapse(2)
+        for (iz = halo - radius; iz < ntz - halo + radius - 1; ++iz)
+            for (ix = halo; ix < ntx - halo; ++ix) {
+                int ip = iz * ntx + ix;
+                flux_z[ip] = face_bz[ip] * vd_face_gradient_z(
+                    ip, ntx, inv_dz, radius, derivative, field
+                );
+            }
+    }
+}
+
+static float vd_div_flux_at(int ip, int ntx, int radius,
+                            float inv_dx, float inv_dz,
+                            const float *derivative,
+                            const float *flux_x, const float *flux_z)
+{
+    int k;
+    float div_x = 0.0f, div_z = 0.0f;
+
+    for (k = 0; k < radius; ++k) {
+        div_x += derivative[k] * (flux_x[ip + k] - flux_x[ip - 1 - k]);
+        div_z += derivative[k] *
+            (flux_z[ip + k * ntx] - flux_z[ip - (1 + k) * ntx]);
+    }
+    return div_x * inv_dx + div_z * inv_dz;
+}
+
 /* Conservative high-order discretisation: div(b grad(p)) = -G^T B G p. */
 static float vd_div_b_grad_at(int ip, int ntx, int radius,
                               float inv_dx, float inv_dz,
@@ -245,47 +318,52 @@ static float vd_div_b_grad_at(int ip, int ntx, int radius,
 
 static void vd_step(int ntx, int ntz, int radius, int halo,
                     float dx, float dz, float dt,
-                    const float *derivative, const float *interpolation,
-                    const float *bulk, const float *buoyancy,
-                    const float *p0, const float *p1, float *p2)
+                    const float *derivative, const float *face_bx,
+                    const float *face_bz, const float *bulk,
+                    const float *p0, const float *p1, float *p2,
+                    float *flux_x, float *flux_z)
 {
     int ix, iz;
     float inv_dx = 1.0f / dx;
     float inv_dz = 1.0f / dz;
     float dt2 = dt * dt;
 
+    vd_compute_fluxes(ntx, ntz, radius, halo, inv_dx, inv_dz, derivative,
+                      face_bx, face_bz, p1, flux_x, flux_z);
     #pragma omp parallel for collapse(2)
-    for (iz = halo; iz < ntz - halo; ++iz) {
+    for (iz = halo; iz < ntz - halo; ++iz)
         for (ix = halo; ix < ntx - halo; ++ix) {
             int ip = iz * ntx + ix;
             p2[ip] = 2.0f * p1[ip] - p0[ip] + dt2 * bulk[ip] *
-                vd_div_b_grad_at(ip, ntx, radius, inv_dx, inv_dz, derivative,
-                                 interpolation, buoyancy, p1);
+                vd_div_flux_at(ip, ntx, radius, inv_dx, inv_dz, derivative,
+                               flux_x, flux_z);
         }
-    }
 }
 
 static void vd_accumulate_gradients(int ntx, int ntz, int pml, int radius,
                                     float dx, float dz, float dt,
                                     int source_index, float source_value,
                                     const float *velocity, const float *density,
-                                    const float *bulk, const float *buoyancy,
+                                    const float *bulk, const float *face_bx,
+                                    const float *face_bz,
                                     const float *derivative, const float *interpolation,
                                     const float *forward_p, const float *adjoint_p,
-                                    float *grad_velocity, float *grad_density)
+                                    float *grad_velocity, float *grad_density,
+                                    float *flux_x, float *flux_z)
 {
     int ix, iz, k;
     float inv_dx = 1.0f / dx;
     float inv_dz = 1.0f / dz;
 
+    vd_compute_fluxes(ntx, ntz, radius, 2 * radius, inv_dx, inv_dz,
+                      derivative, face_bx, face_bz, forward_p, flux_x, flux_z);
     #pragma omp parallel for collapse(2)
     for (iz = pml; iz < ntz - pml; ++iz) {
         for (ix = pml; ix < ntx - pml; ++ix) {
             int ip = iz * ntx + ix;
             int model_ip = (iz - pml) * (ntx - 2 * pml) + (ix - pml);
-            float spatial = vd_div_b_grad_at(ip, ntx, radius, inv_dx, inv_dz,
-                                             derivative, interpolation, buoyancy,
-                                             forward_p);
+            float spatial = vd_div_flux_at(ip, ntx, radius, inv_dx, inv_dz,
+                                           derivative, flux_x, flux_z);
             float source = (ip == source_index) ? source_value : 0.0f;
             float p_tt = bulk[ip] * spatial + velocity[ip] * velocity[ip] * source;
             float rho = density[ip];
@@ -310,57 +388,47 @@ static void vd_accumulate_gradients(int ntx, int ntz, int pml, int radius,
         }
     }
 
-    /* x-face contribution from d[b_face]/d rho. */
-    for (iz = pml; iz < ntz - pml; ++iz) {
-        for (ix = pml; ix < ntx - pml - 1; ++ix) {
-            int left = iz * ntx + ix;
-            float adjoint_gradient = vd_face_gradient_x(left, inv_dx, radius,
-                                                         derivative, adjoint_p);
-            float forward_gradient = vd_face_gradient_x(left, inv_dx, radius,
-                                                         derivative, forward_p);
-            for (k = 0; k < radius; ++k) {
-                int left_node = left - k;
-                int right_node = left + 1 + k;
-                if (left_node >= iz * ntx + pml && left_node < iz * ntx + ntx - pml) {
-                    int model_left = (iz - pml) * (ntx - 2 * pml) +
-                        (left_node - iz * ntx - pml);
-                    grad_density[model_left] += interpolation[k] * adjoint_gradient *
-                        forward_gradient / (density[left_node] * density[left_node]);
-                }
-                if (right_node >= iz * ntx + pml && right_node < iz * ntx + ntx - pml) {
-                    int model_right = (iz - pml) * (ntx - 2 * pml) +
-                        (right_node - iz * ntx - pml);
-                    grad_density[model_right] += interpolation[k] * adjoint_gradient *
-                        forward_gradient / (density[right_node] * density[right_node]);
-                }
+    /* Store G(adjoint)*G(forward) once per physical face. */
+    #pragma omp parallel
+    {
+        #pragma omp for collapse(2)
+        for (iz = pml; iz < ntz - pml; ++iz)
+            for (ix = pml; ix < ntx - pml - 1; ++ix) {
+                int face = iz * ntx + ix;
+                flux_x[face] = vd_face_gradient_x(
+                    face, inv_dx, radius, derivative, adjoint_p
+                ) * vd_face_gradient_x(
+                    face, inv_dx, radius, derivative, forward_p
+                );
             }
-        }
+        #pragma omp for collapse(2)
+        for (iz = pml; iz < ntz - pml - 1; ++iz)
+            for (ix = pml; ix < ntx - pml; ++ix) {
+                int face = iz * ntx + ix;
+                flux_z[face] = vd_face_gradient_z(
+                    face, ntx, inv_dz, radius, derivative, adjoint_p
+                ) * vd_face_gradient_z(
+                    face, ntx, inv_dz, radius, derivative, forward_p
+                );
+            }
     }
 
-    /* z-face contribution from d[b_face]/d rho. */
-    for (iz = pml; iz < ntz - pml - 1; ++iz) {
+    /* Gather face contributions by model node.  This is algebraically the
+     * same interpolation transpose as the former face-to-node scatter, but
+     * every node is now independent and can be updated in parallel. */
+    #pragma omp parallel for collapse(2)
+    for (iz = pml; iz < ntz - pml; ++iz) {
         for (ix = pml; ix < ntx - pml; ++ix) {
-            int top = iz * ntx + ix;
-            float adjoint_gradient = vd_face_gradient_z(top, ntx, inv_dz, radius,
-                                                         derivative, adjoint_p);
-            float forward_gradient = vd_face_gradient_z(top, ntx, inv_dz, radius,
-                                                         derivative, forward_p);
+            int ip = iz * ntx + ix;
+            int model_ip = (iz - pml) * (ntx - 2 * pml) + (ix - pml);
+            float face_term = 0.0f;
             for (k = 0; k < radius; ++k) {
-                int top_node = top - k * ntx;
-                int bottom_node = top + (1 + k) * ntx;
-                if (top_node >= pml * ntx && top_node < (ntz - pml) * ntx) {
-                    int model_top = (top_node - pml * ntx) / ntx * (ntx - 2 * pml) +
-                        (ix - pml);
-                    grad_density[model_top] += interpolation[k] * adjoint_gradient *
-                        forward_gradient / (density[top_node] * density[top_node]);
-                }
-                if (bottom_node >= pml * ntx && bottom_node < (ntz - pml) * ntx) {
-                    int model_bottom = (bottom_node - pml * ntx) / ntx * (ntx - 2 * pml) +
-                        (ix - pml);
-                    grad_density[model_bottom] += interpolation[k] * adjoint_gradient *
-                        forward_gradient / (density[bottom_node] * density[bottom_node]);
-                }
+                if (ix + k < ntx - pml - 1) face_term += interpolation[k] * flux_x[ip + k];
+                if (ix - 1 - k >= pml) face_term += interpolation[k] * flux_x[ip - 1 - k];
+                if (iz + k < ntz - pml - 1) face_term += interpolation[k] * flux_z[ip + k * ntx];
+                if (iz - 1 - k >= pml) face_term += interpolation[k] * flux_z[ip - (1 + k) * ntx];
             }
+            grad_density[model_ip] += face_term / (density[ip] * density[ip]);
         }
     }
 }
@@ -436,6 +504,7 @@ void forward_vd_2D(char input_file[200], const float *vel_inner,
     float dx, dz, dt, f0, vmax;
     float derivative[6], interpolation[6];
     float *velocity = NULL, *density = NULL, *bulk = NULL, *buoyancy = NULL;
+    float *face_bx = NULL, *face_bz = NULL, *flux_x = NULL, *flux_z = NULL;
     float *w = NULL, *t11 = NULL, *t12 = NULL, *t13 = NULL;
     float *p0 = NULL, *p1 = NULL, *p2 = NULL, *wavelet = NULL;
 
@@ -460,13 +529,20 @@ void forward_vd_2D(char input_file[200], const float *vel_inner,
     density = vd_malloc(ntp, sizeof(float), "extended density");
     bulk = vd_malloc(ntp, sizeof(float), "bulk modulus");
     buoyancy = vd_malloc(ntp, sizeof(float), "buoyancy");
+    face_bx = vd_malloc(ntp, sizeof(float), "x-face buoyancy");
+    face_bz = vd_malloc(ntp, sizeof(float), "z-face buoyancy");
+    flux_x = vd_malloc(ntp, sizeof(float), "x flux workspace");
+    flux_z = vd_malloc(ntp, sizeof(float), "z flux workspace");
     p0 = vd_malloc(ntp, sizeof(float), "forward p0");
     p1 = vd_malloc(ntp, sizeof(float), "forward p1");
     p2 = vd_malloc(ntp, sizeof(float), "forward p2");
     wavelet = vd_malloc(nt, sizeof(float), "Ricker wavelet");
-    if (!velocity || !density || !bulk || !buoyancy || !p0 || !p1 || !p2 || !wavelet) goto cleanup;
+    if (!velocity || !density || !bulk || !buoyancy || !face_bx || !face_bz ||
+        !flux_x || !flux_z || !p0 || !p1 || !p2 || !wavelet) goto cleanup;
     if (!vd_extend_models(nx, nz, pml, ntx, ntz, vel_inner, rho_inner,
                           velocity, density, bulk, buoyancy, &vmax)) goto cleanup;
+    vd_prepare_face_buoyancies(ntx, ntz, input_lc, interpolation, buoyancy,
+                               face_bx, face_bz);
     if (vmax * dt * sqrtf(1.0f / (dx * dx) + 1.0f / (dz * dz)) >= 1.0f) {
         fprintf(stderr, "Variable-density model violates the CFL condition.\n");
         goto cleanup;
@@ -481,8 +557,8 @@ void forward_vd_2D(char input_file[200], const float *vel_inner,
         memset(p2, 0, (size_t)ntp * sizeof(float));
         for (it = 0; it < nt; ++it) {
             float *tmp;
-            vd_step(ntx, ntz, input_lc, halo, dx, dz, dt, derivative, interpolation,
-                    bulk, buoyancy, p0, p1, p2);
+            vd_step(ntx, ntz, input_lc, halo, dx, dz, dt, derivative,
+                    face_bx, face_bz, bulk, p0, p1, p2, flux_x, flux_z);
             abc_for_p(ntx, ntz, halo, pml, p0, p1, p2, w, t11, t12, t13);
             p2[source_index] += dt * dt * velocity[source_index] * velocity[source_index] * wavelet[it];
             #pragma omp parallel for
@@ -496,6 +572,7 @@ void forward_vd_2D(char input_file[200], const float *vel_inner,
 
 cleanup:
     free(velocity); free(density); free(bulk); free(buoyancy);
+    free(face_bx); free(face_bz); free(flux_x); free(flux_z);
     free(w); free(t11); free(t12); free(t13);
     free(p0); free(p1); free(p2); free(wavelet);
 }
@@ -512,6 +589,7 @@ void fwi_vd_2D(char input_file[200], const float *vel_inner,
     float dx, dz, dt, f0, vmax;
     float derivative[6], interpolation[6];
     float *velocity = NULL, *density = NULL, *bulk = NULL, *buoyancy = NULL;
+    float *face_bx = NULL, *face_bz = NULL, *flux_x = NULL, *flux_z = NULL;
     float *w = NULL, *t11 = NULL, *t12 = NULL, *t13 = NULL;
     float *p0 = NULL, *p1 = NULL, *p2 = NULL, *wavelet = NULL, *forward_p = NULL;
     float *adj0 = NULL, *adj1 = NULL, *adj2 = NULL;
@@ -535,6 +613,10 @@ void fwi_vd_2D(char input_file[200], const float *vel_inner,
     density = vd_malloc(ntp, sizeof(float), "extended density");
     bulk = vd_malloc(ntp, sizeof(float), "bulk modulus");
     buoyancy = vd_malloc(ntp, sizeof(float), "buoyancy");
+    face_bx = vd_malloc(ntp, sizeof(float), "x-face buoyancy");
+    face_bz = vd_malloc(ntp, sizeof(float), "z-face buoyancy");
+    flux_x = vd_malloc(ntp, sizeof(float), "x flux workspace");
+    flux_z = vd_malloc(ntp, sizeof(float), "z flux workspace");
     p0 = vd_malloc(ntp, sizeof(float), "forward p0");
     p1 = vd_malloc(ntp, sizeof(float), "forward p1");
     p2 = vd_malloc(ntp, sizeof(float), "forward p2");
@@ -543,9 +625,13 @@ void fwi_vd_2D(char input_file[200], const float *vel_inner,
     adj2 = vd_malloc(ntp, sizeof(float), "adjoint p2");
     wavelet = vd_malloc(nt, sizeof(float), "Ricker wavelet");
     forward_p = vd_malloc(wavefield_count, sizeof(float), "forward wavefield");
-    if (!velocity || !density || !bulk || !buoyancy || !p0 || !p1 || !p2 || !adj0 || !adj1 || !adj2 || !wavelet || !forward_p) goto cleanup;
+    if (!velocity || !density || !bulk || !buoyancy || !face_bx || !face_bz ||
+        !flux_x || !flux_z || !p0 || !p1 || !p2 || !adj0 || !adj1 || !adj2 ||
+        !wavelet || !forward_p) goto cleanup;
     if (!vd_extend_models(nx, nz, pml, ntx, ntz, vel_inner, rho_inner,
                           velocity, density, bulk, buoyancy, &vmax)) goto cleanup;
+    vd_prepare_face_buoyancies(ntx, ntz, input_lc, interpolation, buoyancy,
+                               face_bx, face_bz);
     if (vmax * dt * sqrtf(1.0f / (dx * dx) + 1.0f / (dz * dz)) >= 1.0f) {
         fprintf(stderr, "Variable-density model violates the CFL condition.\n");
         goto cleanup;
@@ -563,8 +649,8 @@ void fwi_vd_2D(char input_file[200], const float *vel_inner,
         for (it = 0; it < nt; ++it) {
             float *tmp;
             memcpy(forward_p + (size_t)it * ntp, p1, (size_t)ntp * sizeof(float));
-            vd_step(ntx, ntz, input_lc, halo, dx, dz, dt, derivative, interpolation,
-                    bulk, buoyancy, p0, p1, p2);
+            vd_step(ntx, ntz, input_lc, halo, dx, dz, dt, derivative,
+                    face_bx, face_bz, bulk, p0, p1, p2, flux_x, flux_z);
             abc_for_p(ntx, ntz, halo, pml, p0, p1, p2, w, t11, t12, t13);
             p2[source_index] += dt * dt * velocity[source_index] * velocity[source_index] * wavelet[it];
             #pragma omp parallel for
@@ -580,8 +666,8 @@ void fwi_vd_2D(char input_file[200], const float *vel_inner,
         memset(adj2, 0, (size_t)ntp * sizeof(float));
         for (it = nt - 1; it >= 0; --it) {
             float *tmp;
-            vd_step(ntx, ntz, input_lc, halo, dx, dz, dt, derivative, interpolation,
-                    bulk, buoyancy, adj0, adj1, adj2);
+            vd_step(ntx, ntz, input_lc, halo, dx, dz, dt, derivative,
+                    face_bx, face_bz, bulk, adj0, adj1, adj2, flux_x, flux_z);
             abc_for_p(ntx, ntz, halo, pml, adj0, adj1, adj2, w, t11, t12, t13);
             for (ir = 0; ir < nr; ++ir) {
                 size_t data_index = ((size_t)is * nt + it) * nr + ir;
@@ -592,9 +678,9 @@ void fwi_vd_2D(char input_file[200], const float *vel_inner,
                 adj2[receiver_index] += dt * dt * bulk[receiver_index] * residual;
             }
             vd_accumulate_gradients(ntx, ntz, pml, input_lc, dx, dz, dt, source_index,
-                                    wavelet[it], velocity, density, bulk, buoyancy,
+                                    wavelet[it], velocity, density, bulk, face_bx, face_bz,
                                     derivative, interpolation, forward_p + (size_t)it * ntp, adj2,
-                                    grad_velocity, grad_density);
+                                    grad_velocity, grad_density, flux_x, flux_z);
             tmp = adj0; adj0 = adj1; adj1 = adj2; adj2 = tmp;
         }
     }
@@ -602,6 +688,7 @@ void fwi_vd_2D(char input_file[200], const float *vel_inner,
 
 cleanup:
     free(velocity); free(density); free(bulk); free(buoyancy);
+    free(face_bx); free(face_bz); free(flux_x); free(flux_z);
     free(w); free(t11); free(t12); free(t13);
     free(p0); free(p1); free(p2); free(adj0); free(adj1); free(adj2);
     free(wavelet); free(forward_p);
@@ -619,6 +706,7 @@ void vd_wavefield_snapshots_2D(char input_file[200], const float *vel_inner,
     float dx, dz, dt, f0, vmax;
     float derivative[6], interpolation[6];
     float *velocity = NULL, *density = NULL, *bulk = NULL, *buoyancy = NULL;
+    float *face_bx = NULL, *face_bz = NULL, *flux_x = NULL, *flux_z = NULL;
     float *w = NULL, *t11 = NULL, *t12 = NULL, *t13 = NULL;
     float *p0 = NULL, *p1 = NULL, *p2 = NULL, *wavelet = NULL;
     float *adj0 = NULL, *adj1 = NULL, *adj2 = NULL;
@@ -641,6 +729,10 @@ void vd_wavefield_snapshots_2D(char input_file[200], const float *vel_inner,
     density = vd_malloc(ntp, sizeof(float), "snapshot extended density");
     bulk = vd_malloc(ntp, sizeof(float), "snapshot bulk modulus");
     buoyancy = vd_malloc(ntp, sizeof(float), "snapshot buoyancy");
+    face_bx = vd_malloc(ntp, sizeof(float), "snapshot x-face buoyancy");
+    face_bz = vd_malloc(ntp, sizeof(float), "snapshot z-face buoyancy");
+    flux_x = vd_malloc(ntp, sizeof(float), "snapshot x flux workspace");
+    flux_z = vd_malloc(ntp, sizeof(float), "snapshot z flux workspace");
     p0 = vd_malloc(ntp, sizeof(float), "snapshot forward p0");
     p1 = vd_malloc(ntp, sizeof(float), "snapshot forward p1");
     p2 = vd_malloc(ntp, sizeof(float), "snapshot forward p2");
@@ -648,9 +740,13 @@ void vd_wavefield_snapshots_2D(char input_file[200], const float *vel_inner,
     adj1 = vd_malloc(ntp, sizeof(float), "snapshot adjoint p1");
     adj2 = vd_malloc(ntp, sizeof(float), "snapshot adjoint p2");
     wavelet = vd_malloc(nt, sizeof(float), "snapshot Ricker wavelet");
-    if (!velocity || !density || !bulk || !buoyancy || !p0 || !p1 || !p2 || !adj0 || !adj1 || !adj2 || !wavelet) goto cleanup;
+    if (!velocity || !density || !bulk || !buoyancy || !face_bx || !face_bz ||
+        !flux_x || !flux_z || !p0 || !p1 || !p2 || !adj0 || !adj1 || !adj2 ||
+        !wavelet) goto cleanup;
     if (!vd_extend_models(nx, nz, pml, ntx, ntz, vel_inner, rho_inner,
                           velocity, density, bulk, buoyancy, &vmax)) goto cleanup;
+    vd_prepare_face_buoyancies(ntx, ntz, input_lc, interpolation, buoyancy,
+                               face_bx, face_bz);
     if (vmax * dt * sqrtf(1.0f / (dx * dx) + 1.0f / (dz * dz)) >= 1.0f) goto cleanup;
     if (!vd_prepare_liao_abc(pml0, ntx, ntz, dt, dx, velocity, &w, &t11, &t12, &t13)) goto cleanup;
     getrik(nt, dt, f0, wavelet);
@@ -662,8 +758,8 @@ void vd_wavefield_snapshots_2D(char input_file[200], const float *vel_inner,
         memset(p2, 0, (size_t)ntp * sizeof(float));
         for (it = 0; it < nt; ++it) {
             float *tmp;
-            vd_step(ntx, ntz, input_lc, halo, dx, dz, dt, derivative, interpolation,
-                    bulk, buoyancy, p0, p1, p2);
+            vd_step(ntx, ntz, input_lc, halo, dx, dz, dt, derivative,
+                    face_bx, face_bz, bulk, p0, p1, p2, flux_x, flux_z);
             abc_for_p(ntx, ntz, halo, pml, p0, p1, p2, w, t11, t12, t13);
             p2[source_index] += dt * dt * velocity[source_index] * velocity[source_index] * wavelet[it];
             for (ir = 0; ir < nr; ++ir) {
@@ -684,8 +780,8 @@ void vd_wavefield_snapshots_2D(char input_file[200], const float *vel_inner,
         memset(adj2, 0, (size_t)ntp * sizeof(float));
         for (it = nt - 1; it >= 0; --it) {
             float *tmp;
-            vd_step(ntx, ntz, input_lc, halo, dx, dz, dt, derivative, interpolation,
-                    bulk, buoyancy, adj0, adj1, adj2);
+            vd_step(ntx, ntz, input_lc, halo, dx, dz, dt, derivative,
+                    face_bx, face_bz, bulk, adj0, adj1, adj2, flux_x, flux_z);
             abc_for_p(ntx, ntz, halo, pml, adj0, adj1, adj2, w, t11, t12, t13);
             for (ir = 0; ir < nr; ++ir) {
                 int receiver_index = (pml + depthr) * ntx + pml + nr0 + ir * dr;
@@ -705,6 +801,7 @@ void vd_wavefield_snapshots_2D(char input_file[200], const float *vel_inner,
     if (verbose) printf("Variable-density wavefield snapshots finished.\n");
 cleanup:
     free(velocity); free(density); free(bulk); free(buoyancy);
+    free(face_bx); free(face_bz); free(flux_x); free(flux_z);
     free(w); free(t11); free(t12); free(t13);
     free(p0); free(p1); free(p2); free(adj0); free(adj1); free(adj2); free(wavelet);
 }
