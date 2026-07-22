@@ -1,0 +1,56 @@
+{
+  "configuration": {
+    "model_shape_nz_nx": [110, 250],
+    "nt": 2000,
+    "shots": 5,
+    "receivers_per_shot": 250,
+    "pml0": 10,
+    "Lc": 3,
+    "openmp_threads": "2",
+    "python": "3.10.12",
+    "platform": "Linux-6.8.0-124-generic-x86_64-with-glibc2.35",
+    "repeats": 3
+  },
+  "forward": {
+    "constant_density": {
+      "samples_seconds": [3.0095150019042194, 2.985794856213033, 3.0282413330860436],
+      "median_seconds": 3.0095150019042194,
+      "mean_seconds": 3.0078503970677652,
+      "minimum_seconds": 2.985794856213033,
+      "maximum_seconds": 3.0282413330860436
+    },
+    "variable_density": {
+      "samples_seconds": [2.4363404819741845, 2.4212301708757877, 2.460608588065952],
+      "median_seconds": 2.4363404819741845,
+      "mean_seconds": 2.439393080305308,
+      "minimum_seconds": 2.4212301708757877,
+      "maximum_seconds": 2.460608588065952
+    },
+    "comparison": {
+      "variable_to_constant_time_ratio": 0.8095458837828127,
+      "variable_slowdown_percent": -19.045411621718735,
+      "variable_relative_throughput": 1.2352604343156453
+    }
+  },
+  "forward_adjoint_gradient": {
+    "constant_density": {
+      "samples_seconds": [6.825830471236259, 7.150183279067278, 7.0382599253207445],
+      "median_seconds": 7.0382599253207445,
+      "mean_seconds": 7.00475789187476,
+      "minimum_seconds": 6.825830471236259,
+      "maximum_seconds": 7.150183279067278
+    },
+    "variable_density": {
+      "samples_seconds": [8.052999013103545, 7.587687566876411, 7.625634136144072],
+      "median_seconds": 7.625634136144072,
+      "mean_seconds": 7.755440238708009,
+      "minimum_seconds": 7.587687566876411,
+      "maximum_seconds": 8.052999013103545
+    },
+    "comparison": {
+      "variable_to_constant_time_ratio": 1.0834544641794484,
+      "variable_slowdown_percent": 8.345446417944835,
+      "variable_relative_throughput": 0.9229737225341977
+    }
+  }
+}

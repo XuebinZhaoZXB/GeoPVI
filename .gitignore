@@ -42,7 +42,7 @@ examples/swi3d/input/stimes.dat
 *.log
 
 **.vscode
-**/pytest_cache/
+**/.pytest_cache/
 **/__pycache__/
 **/build/
 **geopvi.egg-info/
@@ -51,6 +51,7 @@ examples/swi3d/input/stimes.dat
 
 # Compiled python modules.
 *.pyc
+.nfs*
 
 # Setuptools distribution folder.
 /dist/

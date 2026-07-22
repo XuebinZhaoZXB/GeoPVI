@@ -5,12 +5,13 @@ import numpy
 from os import system
 npy_include_dir = numpy.get_include()
 
-ext_modules = [Extension("aco2d", ["pyacofwi2D.pyx", "fdtd2D_modelling.c"],
+ext_modules = [Extension("aco2d", ["pyacofwi2D.pyx", "fdtd2D_modelling.c",
+                                    "vdacoustic2D_modelling.c"],
                          include_dirs = [npy_include_dir],
                          language='c',
                          extra_compile_args=["-fopenmp"],
                          extra_link_args=["-fopenmp"],
-                         libraries=["fftw3", "m", "fftw3_threads", "fftw3_omp"],
+                         libraries=["m"],
                          #extra_objects=["fdtd2D_modelling.o"]
                          )]
 

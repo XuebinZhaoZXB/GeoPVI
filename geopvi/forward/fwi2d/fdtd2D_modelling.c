@@ -9,7 +9,6 @@
 #include <string.h>
 #include "fdtd2D_modelling.h"
 #include "omp.h"
-#include "fftw3.h"
 // using namespace std;
 
 #define pi 3.1415926
@@ -64,21 +63,19 @@ void fwi_2D(char input_file[200], float *vel_inner, float *record_syn, float *re
 	
 	// char input_file[200] = "./input/input_param.txt";
 
-	read_parameters(input_file, &nx, &nz, &pml0, &Lc, &laplace_solver, &ns, &nt, &ds, &ns0, 
+	read_parameters(input_file, &nx, &nz, &pml0, &Lc, &laplace_solver, &ns, &nt, &ds, &ns0,
 						&depths, &depthr, &nr, &dr, &nr0, &nt_interval,
 						&dx, &dz, &dt, &f0);
-	Lc += 1;	// second order FD scheme +1 
+	if(laplace_solver != 0)
+	{
+		fprintf(stderr, "Only laplace_solver=0 (finite difference) is supported.\n");
+		return;
+	}
+	Lc += 1;	// second order FD scheme +1
 	float *fd;	//finite difference coefficients
 	fd = (float *)malloc(sizeof(float)*Lc);
 	fd_coefficient(Lc, fd);
 
-	if(laplace_solver == 1)		// use PSM to calculate the Laplace operator
-	{
-		Lc = 0;
-		//==========declear FFTW using Openmp===========//
-		fftw_init_threads();
-		fftw_plan_with_nthreads(omp_get_max_threads());
-	}
 	// int ntsave = nt/nt_interval;
 
 	int it,ix,iz,ir,i,ip;
@@ -105,12 +102,6 @@ void fwi_2D(char input_file[200], float *vel_inner, float *record_syn, float *re
 	rik=(float *) malloc(nt*sizeof(float));
 	getrik(nt, dt, f0, rik);
 
-
-	//================wavenumber vector used for PSM============//
-	//================wavenumber vector used for PSM============//
-	float *k;
-	k = (float*)malloc(sizeof(float)*ntp);
-	wavenumber(ntx, ntz, dx, dz, k);
 
 	
 	//==============observation system definition===============//
@@ -255,7 +246,7 @@ void fwi_2D(char input_file[200], float *vel_inner, float *record_syn, float *re
 		(
 			is, nt, ntx, ntz, ntp, nx, nz, Lc, laplace_solver, pml, rnmax, nt_interval,
 			dx, dz, dt, f0, velp_max, velpaverage, w, t11, t12, t13,
-			fd, rik, velp, k, p0, p1, p2, psave, record, ss, run_fwi
+			fd, rik, velp, p0, p1, p2, psave, record, ss, run_fwi
 		);
 
 		// sprintf(filename,"./output/record_aco_shot%d.bin",is);
@@ -287,7 +278,7 @@ void fwi_2D(char input_file[200], float *vel_inner, float *record_syn, float *re
 		(
 			is, nt, ntx, ntz, ntp, nx, nz, Lc, laplace_solver, pml, rnmax, nt_interval,
 			dx, dz, dt, f0, velp_max, velpaverage, w, t11, t12, t13,
-			fd, rik, velp, k, p0, p1, p2, psave, record, grad, ss, run_fwi
+			fd, rik, velp, p0, p1, p2, psave, record, grad, ss, run_fwi
 		);
 
 		// sprintf(filename,"./output/grad_aco_shot%d.bin",is);
@@ -322,7 +313,6 @@ void fwi_2D(char input_file[200], float *vel_inner, float *record_syn, float *re
 	free(rik);
 	free(fd);
 	free(velp);
-	free(k);
 	free(p0);
 	free(p1);
 	free(p2);
@@ -407,21 +397,19 @@ void forward_2D(char input_file[200], float *vel_inner, float *record_syn, int r
 	
 	// char input_file[200] = "./input/input_param.txt";
 
-	read_parameters(input_file, &nx, &nz, &pml0, &Lc, &laplace_solver, &ns, &nt, &ds, &ns0, 
+	read_parameters(input_file, &nx, &nz, &pml0, &Lc, &laplace_solver, &ns, &nt, &ds, &ns0,
 						&depths, &depthr, &nr, &dr, &nr0, &nt_interval,
 						&dx, &dz, &dt, &f0);
-	Lc += 1;	// second order FD scheme +1 
+	if(laplace_solver != 0)
+	{
+		fprintf(stderr, "Only laplace_solver=0 (finite difference) is supported.\n");
+		return;
+	}
+	Lc += 1;	// second order FD scheme +1
 	float *fd;	//finite difference coefficients
 	fd = (float *)malloc(sizeof(float)*Lc);
 	fd_coefficient(Lc, fd);
 
-	if(laplace_solver == 1)		// use PSM to calculate the Laplace operator
-	{
-		Lc = 0;
-		//==========declear FFTW using Openmp===========//
-		fftw_init_threads();
-		fftw_plan_with_nthreads(omp_get_max_threads());
-	}
 	// int ntsave = nt/nt_interval;
 
 	int it,ix,iz,ir,i,ip;
@@ -451,12 +439,6 @@ void forward_2D(char input_file[200], float *vel_inner, float *record_syn, int r
 	getrik(nt, dt, f0, rik);
 
 
-	//================wavenumber vector used for PSM============//
-	//================wavenumber vector used for PSM============//
-	float *k;
-	k = (float*)malloc(sizeof(float)*ntp);
-	wavenumber(ntx, ntz, dx, dz, k);
-	
 
 	//==============observation system definition===============//
 	//==============observation system definition===============//
@@ -602,7 +584,7 @@ void forward_2D(char input_file[200], float *vel_inner, float *record_syn, int r
 		(
 			is, nt, ntx, ntz, ntp, nx, nz, Lc, laplace_solver, pml, rnmax, nt_interval,
 			dx, dz, dt, f0, velp_max, velpaverage, w, t11, t12, t13,
-			fd, rik, velp, k, p0, p1, p2, psave, record, ss, run_fwi
+			fd, rik, velp, p0, p1, p2, psave, record, ss, run_fwi
 		);
 
 		// sprintf(filename,"./output/record_aco_shot%d.bin",is);
@@ -643,7 +625,6 @@ void forward_2D(char input_file[200], float *vel_inner, float *record_syn, int r
 	free(rik);
 	free(fd);
 	free(velp);
-	free(k);
 	free(p0);
 	free(p1);
 	free(p2);
@@ -684,7 +665,7 @@ void forward_2D(char input_file[200], float *vel_inner, float *record_syn, int r
 void forward_aco_2D(int is, int nt, int ntx, int ntz, int ntp, int nx, int nz, 
 					int Lc, int laplace_solver, int pml, int rnmax, int nt_interval,
 					float dx, float dz, float dt, float f0, float velp_max, float velpaverage, 
-					float *w, float *t11, float *t12, float *t13, float *fd, float *rik, float *velp, float * k,
+			float *w, float *t11, float *t12, float *t13, float *fd, float *rik, float *velp,
 					float *p0, float *p1, float *p2, float *psave, float *record, struct Source ss[], int run_fwi)
 {
 	int i, it, ix, iz, ir;
@@ -695,10 +676,7 @@ void forward_aco_2D(int is, int nt, int ntx, int ntz, int ntp, int nx, int nz,
 
 	for(it=0; it<nt; it++)
 	{
-		if(laplace_solver == 0)
-			{fdtd_2d_calculate_p(ntx, ntz, Lc, pml, dx, dz, dt, fd, velp, p0, p1, p2);}
-		if(laplace_solver == 1)
-			{pstd_2d_calculate_p(ntx, ntz, dx, dz, dt, velp, k, p0, p1, p2);}
+		fdtd_2d_calculate_p(ntx, ntz, Lc, pml, dx, dz, dt, fd, velp, p0, p1, p2);
 		
 		abc_for_p(ntx, ntz, Lc, pml, p0, p1, p2, w, t11, t12, t13);
 		forward_IO(ntx, ntz, pml, nt, nt_interval, it, dx, dz, dt, rik, velp, p0, p1, p2, psave, record,
@@ -723,7 +701,7 @@ void forward_aco_2D(int is, int nt, int ntx, int ntz, int ntp, int nx, int nz,
 void backward_aco_2D(int is, int nt, int ntx, int ntz, int ntp, int nx, int nz, 
 					int Lc, int laplace_solver, int pml, int rnmax, int nt_interval,
 					float dx, float dz, float dt, float f0, float velp_max, float velpaverage, 
-					float *w, float *t11, float *t12, float *t13, float *fd, float *rik, float *velp, float * k, 
+			float *w, float *t11, float *t12, float *t13, float *fd, float *rik, float *velp,
 					float *p0, float *p1, float *p2, float *psave, float *record,
 					float *grad, struct Source ss[], int run_fwi)
 {
@@ -735,10 +713,7 @@ void backward_aco_2D(int is, int nt, int ntx, int ntz, int ntp, int nx, int nz,
 
 	for(it=nt-1; it>=0; it--)
 	{
-		if(laplace_solver == 0)
-			{fdtd_2d_calculate_p(ntx, ntz, Lc, pml, dx, dz, dt, fd, velp, p0, p1, p2);}
-		if(laplace_solver == 1)
-			{pstd_2d_calculate_p(ntx, ntz, dx, dz, dt, velp, k, p0, p1, p2);}
+		fdtd_2d_calculate_p(ntx, ntz, Lc, pml, dx, dz, dt, fd, velp, p0, p1, p2);
 		abc_for_p(ntx, ntz, Lc, pml, p0, p1, p2, w, t11, t12, t13);
 		backward_IO(ntx, ntz, pml, nt, nt_interval, it, dx, dz, dt, velp, p0, p1, p2, psave, record, grad,
 						ss[is].s_ix, ss[is].s_iz, ss[is].r_iz, ss[is].r_ix, ss[is].r_n, run_fwi);
@@ -783,56 +758,6 @@ void fdtd_2d_calculate_p(int ntx, int ntz, int Lc, int pml, float dx, float dz, 
 									(d2p_dx2/dx/dx + d2p_dz2/dz/dz);
 		}
 	}
-}
-
-
-void pstd_2d_calculate_p(int ntx, int ntz, float dx, float dz, float dt, 
-							float *velp, float *k, float *p0, float *p1, float *p2)
-{
-	int ix, iz;
-	fftw_complex *indata;
-	indata = (fftw_complex*) fftw_malloc(sizeof(fftw_complex)*ntx*ntz);
-
-	#pragma omp parallel for collapse(2) private(iz,ix) 
-	for(ix=0; ix<ntx; ix++)
-	{
-		for(iz=0; iz<ntz; iz++)
-		{
-			indata[iz*ntx+ix][0]=p1[iz*ntx+ix];
-			indata[iz*ntx+ix][1]=0.0;
-		}
-	}
-
-	fftw_plan p;
-	p = fftw_plan_dft_2d(ntz, ntx, indata, indata, FFTW_FORWARD, FFTW_ESTIMATE);
-	fftw_execute(p); /* repeat as needed */
-	fftw_destroy_plan(p);
-
-	#pragma omp parallel for collapse(2) private(iz,ix)
-	for(ix=0; ix<ntx; ix++)
-	{
-		for(iz=0; iz<ntz; iz++)
-		{
-			indata[iz*ntx+ix][0] = -k[iz*ntx+ix] * indata[iz*ntx+ix][0];
-			indata[iz*ntx+ix][1] = -k[iz*ntx+ix] * indata[iz*ntx+ix][1];
-		}
-	}
-
-	p = fftw_plan_dft_2d(ntz, ntx, indata, indata, FFTW_BACKWARD, FFTW_ESTIMATE);
-	fftw_execute(p); /* repeat as needed */
-	fftw_destroy_plan(p);
-
-	#pragma omp parallel for collapse(2) private(iz,ix) 
-	for(ix=0; ix<ntx; ix++)
-	{
-		for(iz=0; iz<ntz; iz++)
-		{
-			p2[iz*ntx+ix] = 2*p1[iz*ntx+ix] - p0[iz*ntx+ix] + powf(velp[iz*ntx+ix]*dt, 2) * 
-									indata[iz*ntx+ix][0] / (ntx * ntz);
-		}
-	}
-	
-	fftw_free(indata);
 }
 
 
@@ -1129,66 +1054,6 @@ void getrik(int nt, float dt, float f0, float *rik)
 	free(a);
 	*/
 }
-
-void wavenumber(int ntx, int ntz, float dx, float dz, float *k)
-{
-	float dkx,dkz;
-    int ix,iz;
-    dkz=1.0/ntz/dz;
-    dkx=1.0/ntx/dx;
-
-	float *kx, *kz;
-	kx = (float*)malloc(sizeof(float)*ntx*ntz);
-	kz = (float*)malloc(sizeof(float)*ntx*ntz);
-    
-    int ax,az;
-    ax=ntx/2;		az=ntz/2;
-    if(ntx/2*2<ntx)
-    {
-    	ax=ax+1;
-    }    
-	if(ntz/2*2<ntz)
-    {
-    	az=az+1;
-    }
-        
-    for(ix=0;ix<ntx;ix++)
-    {
-    	for(iz=0;iz<az;iz++)
-        {
- 	       kz[iz*ntx+ix]=2*pi*dkz*iz;
-       	}
-        for(iz=az;iz<ntz;iz++)
-       	{
-      	    kz[iz*ntx+ix]=2*pi*dkz*(ntz-iz);
-       	}
-     }
-     
-    for(iz=0;iz<ntz;iz++)
-    {
-       	for(ix=0;ix<ax;ix++)
-       	{
-       		kx[iz*ntx+ix]=2*pi*dkx*ix;       		
-        }
-        for(ix=ax;ix<ntx;ix++)
-        {
-         	kx[iz*ntx+ix]=2*pi*dkx*(ntx-ix);
-        }
-    }
-    
-	#pragma omp parallel for collapse(2) private(iz,ix)
-    for(iz=0;iz<ntz;iz++)
-    {
-        for(ix=0;ix<ntx;ix++)
-        {
-            k[iz*ntx+ix]=pow(kx[iz*ntx+ix],2.0)+pow(kz[iz*ntx+ix],2.0);
-//      		k[ix][iz]=sqrt(k[ix][iz]); 
-        }
-    }
-
-	free(kx);	free(kz);
-}
-
 
 void get_velp(int pml, int ntx, int ntz, float *vel_inner, float *velp)
 {

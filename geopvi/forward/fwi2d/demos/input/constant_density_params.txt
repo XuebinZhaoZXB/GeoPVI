@@ -1,0 +1,38 @@
+-- nx
+81
+-- nz
+51
+-- pml0
+8
+-- Lc
+3
+-- laplace_solver
+0
+-- ns
+1
+-- nt
+400
+-- ds
+1
+-- ns0
+40
+-- depths
+5
+-- depthr
+5
+-- nr
+81
+-- dr
+1
+-- nr0
+0
+-- nt_interval
+1
+-- dx
+10.0
+-- dz
+10.0
+-- dt
+0.001
+-- f0
+18.0
