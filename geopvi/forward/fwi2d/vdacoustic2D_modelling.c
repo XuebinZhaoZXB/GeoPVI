@@ -271,6 +271,34 @@ static void vd_compute_fluxes(int ntx, int ntz, int radius, int halo,
     }
 }
 
+static void vd_compute_physical_face_gradients(
+    int ntx, int ntz, int pml, int radius, float inv_dx, float inv_dz,
+    const float *derivative, const float *field,
+    float *gradient_x, float *gradient_z)
+{
+    int ix, iz;
+
+    #pragma omp parallel
+    {
+        #pragma omp for collapse(2)
+        for (iz = pml; iz < ntz - pml; ++iz)
+            for (ix = pml; ix < ntx - pml - 1; ++ix) {
+                int face = iz * ntx + ix;
+                gradient_x[face] = vd_face_gradient_x(
+                    face, inv_dx, radius, derivative, field
+                );
+            }
+        #pragma omp for collapse(2)
+        for (iz = pml; iz < ntz - pml - 1; ++iz)
+            for (ix = pml; ix < ntx - pml; ++ix) {
+                int face = iz * ntx + ix;
+                gradient_z[face] = vd_face_gradient_z(
+                    face, ntx, inv_dz, radius, derivative, field
+                );
+            }
+    }
+}
+
 static float vd_div_flux_at(int ip, int ntx, int radius,
                             float inv_dx, float inv_dz,
                             const float *derivative,
@@ -316,20 +344,17 @@ static float vd_div_b_grad_at(int ip, int ntx, int radius,
     return div_x * inv_dx + div_z * inv_dz;
 }
 
-static void vd_step(int ntx, int ntz, int radius, int halo,
-                    float dx, float dz, float dt,
-                    const float *derivative, const float *face_bx,
-                    const float *face_bz, const float *bulk,
-                    const float *p0, const float *p1, float *p2,
-                    float *flux_x, float *flux_z)
+static void vd_step_from_flux(int ntx, int ntz, int radius, int halo,
+                              float dx, float dz, float dt,
+                              const float *derivative, const float *bulk,
+                              const float *p0, const float *p1, float *p2,
+                              const float *flux_x, const float *flux_z)
 {
     int ix, iz;
     float inv_dx = 1.0f / dx;
     float inv_dz = 1.0f / dz;
     float dt2 = dt * dt;
 
-    vd_compute_fluxes(ntx, ntz, radius, halo, inv_dx, inv_dz, derivative,
-                      face_bx, face_bz, p1, flux_x, flux_z);
     #pragma omp parallel for collapse(2)
     for (iz = halo; iz < ntz - halo; ++iz)
         for (ix = halo; ix < ntx - halo; ++ix) {
@@ -340,34 +365,58 @@ static void vd_step(int ntx, int ntz, int radius, int halo,
         }
 }
 
+static void vd_step(int ntx, int ntz, int radius, int halo,
+                    float dx, float dz, float dt,
+                    const float *derivative, const float *face_bx,
+                    const float *face_bz, const float *bulk,
+                    const float *p0, const float *p1, float *p2,
+                    float *flux_x, float *flux_z)
+{
+    vd_compute_fluxes(ntx, ntz, radius, halo, 1.0f / dx, 1.0f / dz,
+                      derivative, face_bx, face_bz, p1, flux_x, flux_z);
+    vd_step_from_flux(ntx, ntz, radius, halo, dx, dz, dt, derivative,
+                      bulk, p0, p1, p2, flux_x, flux_z);
+}
+
 static void vd_accumulate_gradients(int ntx, int ntz, int pml, int radius,
-                                    float dx, float dz, float dt,
+                                    float dx, float dz, float inv_dt2,
                                     int source_index, float source_value,
-                                    const float *velocity, const float *density,
-                                    const float *bulk, const float *face_bx,
-                                    const float *face_bz,
+                                    const float *velocity_acceleration_factor,
+                                    const float *density_acceleration_factor,
+                                    const float *density_face_factor,
+                                    const float *face_bx, const float *face_bz,
                                     const float *derivative, const float *interpolation,
-                                    const float *forward_p, const float *adjoint_p,
+                                    const float *forward_previous,
+                                    const float *forward_p,
+                                    const float *forward_next,
+                                    const float *adjoint_p,
                                     float *grad_velocity, float *grad_density,
-                                    float *flux_x, float *flux_z)
+                                    float *flux_x, float *flux_z,
+                                    float *face_product_x, float *face_product_z,
+                                    double *profile)
 {
     int ix, iz, k;
+    int nx = ntx - 2 * pml;
     float inv_dx = 1.0f / dx;
     float inv_dz = 1.0f / dz;
+    double started = profile ? omp_get_wtime() : 0.0;
 
-    vd_compute_fluxes(ntx, ntz, radius, 2 * radius, inv_dx, inv_dz,
-                      derivative, face_bx, face_bz, forward_p, flux_x, flux_z);
+    vd_compute_physical_face_gradients(
+        ntx, ntz, pml, radius, inv_dx, inv_dz, derivative, forward_p,
+        face_product_x, face_product_z
+    );
+    if (profile) {
+        profile[0] += omp_get_wtime() - started;
+        started = omp_get_wtime();
+    }
     #pragma omp parallel for collapse(2)
     for (iz = pml; iz < ntz - pml; ++iz) {
         for (ix = pml; ix < ntx - pml; ++ix) {
             int ip = iz * ntx + ix;
             int model_ip = (iz - pml) * (ntx - 2 * pml) + (ix - pml);
-            float spatial = vd_div_flux_at(ip, ntx, radius, inv_dx, inv_dz,
-                                           derivative, flux_x, flux_z);
-            float source = (ip == source_index) ? source_value : 0.0f;
-            float p_tt = bulk[ip] * spatial + velocity[ip] * velocity[ip] * source;
-            float rho = density[ip];
-            float v = velocity[ip];
+            float previous = forward_previous[ip];
+            float acceleration =
+                (forward_next[ip] - 2.0f * forward_p[ip] + previous) * inv_dt2;
 
             /*
              * g_v = 2/(rho v^3) integral(lambda p_tt) dt in the
@@ -376,41 +425,62 @@ static void vd_accumulate_gradients(int ntx, int ntz, int pml, int radius,
              * absorbed into the adjoint-source convention used here.
              */
             grad_velocity[model_ip] +=
-                2.0f * adjoint_p[ip] * p_tt / (rho * v * v * v);
+                adjoint_p[ip] * acceleration *
+                velocity_acceleration_factor[model_ip];
 
             /*
-             * The p_tt and source terms in the continuous rho-gradient
-             * combine to adjoint_p * div(b grad(p)) / rho.  The remaining
-             * derivative of the interpolated face buoyancy is accumulated
-             * below with the same high-order interpolation as vd_step().
+             * The acceleration contribution is lambda*p_tt/(rho^2*v^2).
+             * Its source part is removed once below, leaving the equivalent
+             * lambda*div(b grad(p))/rho term.  The derivative of interpolated
+             * face buoyancy is accumulated separately after this loop.
              */
-            grad_density[model_ip] += adjoint_p[ip] * spatial / rho;
+            grad_density[model_ip] += adjoint_p[ip] * acceleration *
+                density_acceleration_factor[model_ip];
         }
     }
+    {
+        int source_model = (source_index / ntx - pml) * nx +
+            (source_index % ntx - pml);
+        grad_density[source_model] -= adjoint_p[source_index] * source_value *
+            density_face_factor[source_model];
+    }
+    if (profile) {
+        profile[1] += omp_get_wtime() - started;
+        started = omp_get_wtime();
+    }
 
-    /* Store G(adjoint)*G(forward) once per physical face. */
+    /* Reuse the saved forward gradients for the density face term.  At the
+     * same time prepare b*G(adjoint) for the next reverse-time step. */
     #pragma omp parallel
     {
         #pragma omp for collapse(2)
-        for (iz = pml; iz < ntz - pml; ++iz)
-            for (ix = pml; ix < ntx - pml - 1; ++ix) {
+        for (iz = 2 * radius; iz < ntz - 2 * radius; ++iz)
+            for (ix = radius; ix < ntx - radius - 1; ++ix) {
                 int face = iz * ntx + ix;
-                flux_x[face] = vd_face_gradient_x(
+                float gradient = vd_face_gradient_x(
                     face, inv_dx, radius, derivative, adjoint_p
-                ) * vd_face_gradient_x(
-                    face, inv_dx, radius, derivative, forward_p
                 );
+                flux_x[face] = face_bx[face] * gradient;
+                if (iz >= pml && iz < ntz - pml &&
+                    ix >= pml && ix < ntx - pml - 1)
+                    face_product_x[face] *= gradient;
             }
         #pragma omp for collapse(2)
-        for (iz = pml; iz < ntz - pml - 1; ++iz)
-            for (ix = pml; ix < ntx - pml; ++ix) {
+        for (iz = radius; iz < ntz - radius - 1; ++iz)
+            for (ix = 2 * radius; ix < ntx - 2 * radius; ++ix) {
                 int face = iz * ntx + ix;
-                flux_z[face] = vd_face_gradient_z(
+                float gradient = vd_face_gradient_z(
                     face, ntx, inv_dz, radius, derivative, adjoint_p
-                ) * vd_face_gradient_z(
-                    face, ntx, inv_dz, radius, derivative, forward_p
                 );
+                flux_z[face] = face_bz[face] * gradient;
+                if (iz >= pml && iz < ntz - pml - 1 &&
+                    ix >= pml && ix < ntx - pml)
+                    face_product_z[face] *= gradient;
             }
+    }
+    if (profile) {
+        profile[2] += omp_get_wtime() - started;
+        started = omp_get_wtime();
     }
 
     /* Gather face contributions by model node.  This is algebraically the
@@ -423,14 +493,16 @@ static void vd_accumulate_gradients(int ntx, int ntz, int pml, int radius,
             int model_ip = (iz - pml) * (ntx - 2 * pml) + (ix - pml);
             float face_term = 0.0f;
             for (k = 0; k < radius; ++k) {
-                if (ix + k < ntx - pml - 1) face_term += interpolation[k] * flux_x[ip + k];
-                if (ix - 1 - k >= pml) face_term += interpolation[k] * flux_x[ip - 1 - k];
-                if (iz + k < ntz - pml - 1) face_term += interpolation[k] * flux_z[ip + k * ntx];
-                if (iz - 1 - k >= pml) face_term += interpolation[k] * flux_z[ip - (1 + k) * ntx];
+                face_term += interpolation[k] * face_product_x[ip + k];
+                face_term += interpolation[k] * face_product_x[ip - 1 - k];
+                face_term += interpolation[k] * face_product_z[ip + k * ntx];
+                face_term += interpolation[k] *
+                    face_product_z[ip - (1 + k) * ntx];
             }
-            grad_density[model_ip] += face_term / (density[ip] * density[ip]);
+            grad_density[model_ip] += face_term * density_face_factor[model_ip];
         }
     }
+    if (profile) profile[3] += omp_get_wtime() - started;
 }
 
 /* Diagnostic operator used by the manufactured-solution regression test.
@@ -561,7 +633,6 @@ void forward_vd_2D(char input_file[200], const float *vel_inner,
                     face_bx, face_bz, bulk, p0, p1, p2, flux_x, flux_z);
             abc_for_p(ntx, ntz, halo, pml, p0, p1, p2, w, t11, t12, t13);
             p2[source_index] += dt * dt * velocity[source_index] * velocity[source_index] * wavelet[it];
-            #pragma omp parallel for
             for (ir = 0; ir < nr; ++ir) {
                 int receiver_index = (pml + depthr) * ntx + pml + nr0 + ir * dr;
                 record_syn[((size_t)is * nt + it) * nr + ir] = p2[receiver_index];
@@ -586,13 +657,18 @@ void fwi_vd_2D(char input_file[200], const float *vel_inner,
     int depths, depthr, nr, dr, nr0, nt_interval;
     int halo, pml, ntx, ntz, ntp, is, it, ir;
     size_t wavefield_count;
-    float dx, dz, dt, f0, vmax;
+    float dx, dz, dt, f0, vmax, inv_dt2;
     float derivative[6], interpolation[6];
     float *velocity = NULL, *density = NULL, *bulk = NULL, *buoyancy = NULL;
     float *face_bx = NULL, *face_bz = NULL, *flux_x = NULL, *flux_z = NULL;
+    float *face_product_x = NULL, *face_product_z = NULL;
+    float *velocity_acceleration_factor = NULL;
+    float *density_acceleration_factor = NULL;
+    float *density_face_factor = NULL;
     float *w = NULL, *t11 = NULL, *t12 = NULL, *t13 = NULL;
     float *p0 = NULL, *p1 = NULL, *p2 = NULL, *wavelet = NULL, *forward_p = NULL;
     float *adj0 = NULL, *adj1 = NULL, *adj2 = NULL;
+    double profile[10] = {0.0};
 
     read_parameters(input_file, &nx, &nz, &pml0, &input_lc, &laplace_solver,
                     &ns, &nt, &ds, &ns0, &depths, &depthr, &nr, &dr, &nr0,
@@ -600,6 +676,7 @@ void fwi_vd_2D(char input_file[200], const float *vel_inner,
     if (!vd_validate_parameters(nx, nz, pml0, input_lc, laplace_solver, ns, nt, ds, ns0, depths,
                                 depthr, nr, dr, nr0, dx, dz, dt, f0)) return;
     if (!vd_staggered_coefficients(input_lc, derivative, interpolation)) return;
+    inv_dt2 = 1.0f / (dt * dt);
 
     halo = 2 * input_lc;
     pml = pml0 + halo;
@@ -617,6 +694,16 @@ void fwi_vd_2D(char input_file[200], const float *vel_inner,
     face_bz = vd_malloc(ntp, sizeof(float), "z-face buoyancy");
     flux_x = vd_malloc(ntp, sizeof(float), "x flux workspace");
     flux_z = vd_malloc(ntp, sizeof(float), "z flux workspace");
+    face_product_x = vd_malloc(ntp, sizeof(float), "x face-product workspace");
+    face_product_z = vd_malloc(ntp, sizeof(float), "z face-product workspace");
+    velocity_acceleration_factor = vd_malloc(
+        (size_t)nx * nz, sizeof(float), "velocity acceleration-gradient factor"
+    );
+    density_acceleration_factor = vd_malloc(
+        (size_t)nx * nz, sizeof(float), "density acceleration-gradient factor"
+    );
+    density_face_factor = vd_malloc((size_t)nx * nz, sizeof(float),
+                                    "density face-gradient factor");
     p0 = vd_malloc(ntp, sizeof(float), "forward p0");
     p1 = vd_malloc(ntp, sizeof(float), "forward p1");
     p2 = vd_malloc(ntp, sizeof(float), "forward p2");
@@ -626,12 +713,22 @@ void fwi_vd_2D(char input_file[200], const float *vel_inner,
     wavelet = vd_malloc(nt, sizeof(float), "Ricker wavelet");
     forward_p = vd_malloc(wavefield_count, sizeof(float), "forward wavefield");
     if (!velocity || !density || !bulk || !buoyancy || !face_bx || !face_bz ||
-        !flux_x || !flux_z || !p0 || !p1 || !p2 || !adj0 || !adj1 || !adj2 ||
-        !wavelet || !forward_p) goto cleanup;
+        !flux_x || !flux_z || !face_product_x || !face_product_z ||
+        !velocity_acceleration_factor || !density_acceleration_factor ||
+        !density_face_factor || !p0 || !p1 || !p2 || !adj0 || !adj1 ||
+        !adj2 || !wavelet || !forward_p) goto cleanup;
     if (!vd_extend_models(nx, nz, pml, ntx, ntz, vel_inner, rho_inner,
                           velocity, density, bulk, buoyancy, &vmax)) goto cleanup;
     vd_prepare_face_buoyancies(ntx, ntz, input_lc, interpolation, buoyancy,
                                face_bx, face_bz);
+    #pragma omp parallel for
+    for (it = 0; it < nx * nz; ++it) {
+        float v = vel_inner[it];
+        float rho = rho_inner[it];
+        velocity_acceleration_factor[it] = 2.0f / (rho * v * v * v);
+        density_acceleration_factor[it] = 1.0f / (rho * rho * v * v);
+        density_face_factor[it] = 1.0f / (rho * rho);
+    }
     if (vmax * dt * sqrtf(1.0f / (dx * dx) + 1.0f / (dz * dz)) >= 1.0f) {
         fprintf(stderr, "Variable-density model violates the CFL condition.\n");
         goto cleanup;
@@ -640,6 +737,8 @@ void fwi_vd_2D(char input_file[200], const float *vel_inner,
     getrik(nt, dt, f0, wavelet);
     memset(grad_velocity, 0, (size_t)nx * nz * sizeof(float));
     memset(grad_density, 0, (size_t)nx * nz * sizeof(float));
+    memset(face_product_x, 0, (size_t)ntp * sizeof(float));
+    memset(face_product_z, 0, (size_t)ntp * sizeof(float));
 
     for (is = 0; is < ns; ++is) {
         int source_index = (pml + depths) * ntx + pml + ns0 + is * ds;
@@ -648,26 +747,43 @@ void fwi_vd_2D(char input_file[200], const float *vel_inner,
         memset(p2, 0, (size_t)ntp * sizeof(float));
         for (it = 0; it < nt; ++it) {
             float *tmp;
+            double started = verbose ? omp_get_wtime() : 0.0;
             memcpy(forward_p + (size_t)it * ntp, p1, (size_t)ntp * sizeof(float));
+            if (verbose) {
+                profile[4] += omp_get_wtime() - started;
+                started = omp_get_wtime();
+            }
             vd_step(ntx, ntz, input_lc, halo, dx, dz, dt, derivative,
                     face_bx, face_bz, bulk, p0, p1, p2, flux_x, flux_z);
+            if (verbose) {
+                profile[5] += omp_get_wtime() - started;
+                started = omp_get_wtime();
+            }
             abc_for_p(ntx, ntz, halo, pml, p0, p1, p2, w, t11, t12, t13);
             p2[source_index] += dt * dt * velocity[source_index] * velocity[source_index] * wavelet[it];
-            #pragma omp parallel for
             for (ir = 0; ir < nr; ++ir) {
                 int receiver_index = (pml + depthr) * ntx + pml + nr0 + ir * dr;
                 record_syn[((size_t)is * nt + it) * nr + ir] = p2[receiver_index];
             }
+            if (verbose) profile[6] += omp_get_wtime() - started;
             tmp = p0; p0 = p1; p1 = p2; p2 = tmp;
         }
 
         memset(adj0, 0, (size_t)ntp * sizeof(float));
         memset(adj1, 0, (size_t)ntp * sizeof(float));
         memset(adj2, 0, (size_t)ntp * sizeof(float));
+        memset(flux_x, 0, (size_t)ntp * sizeof(float));
+        memset(flux_z, 0, (size_t)ntp * sizeof(float));
         for (it = nt - 1; it >= 0; --it) {
             float *tmp;
-            vd_step(ntx, ntz, input_lc, halo, dx, dz, dt, derivative,
-                    face_bx, face_bz, bulk, adj0, adj1, adj2, flux_x, flux_z);
+            double started = verbose ? omp_get_wtime() : 0.0;
+            vd_step_from_flux(ntx, ntz, input_lc, halo, dx, dz, dt,
+                              derivative, bulk, adj0, adj1, adj2,
+                              flux_x, flux_z);
+            if (verbose) {
+                profile[7] += omp_get_wtime() - started;
+                started = omp_get_wtime();
+            }
             abc_for_p(ntx, ntz, halo, pml, adj0, adj1, adj2, w, t11, t12, t13);
             for (ir = 0; ir < nr; ++ir) {
                 size_t data_index = ((size_t)is * nt + it) * nr + ir;
@@ -677,18 +793,45 @@ void fwi_vd_2D(char input_file[200], const float *vel_inner,
                 /* m lambda_tt - div(b grad lambda) = R^T residual. */
                 adj2[receiver_index] += dt * dt * bulk[receiver_index] * residual;
             }
-            vd_accumulate_gradients(ntx, ntz, pml, input_lc, dx, dz, dt, source_index,
-                                    wavelet[it], velocity, density, bulk, face_bx, face_bz,
-                                    derivative, interpolation, forward_p + (size_t)it * ntp, adj2,
-                                    grad_velocity, grad_density, flux_x, flux_z);
+            if (verbose) profile[8] += omp_get_wtime() - started;
+            vd_accumulate_gradients(ntx, ntz, pml, input_lc, dx, dz,
+                                    inv_dt2, source_index,
+                                    wavelet[it], velocity_acceleration_factor,
+                                    density_acceleration_factor, density_face_factor,
+                                    face_bx, face_bz,
+                                    derivative, interpolation,
+                                    it > 0 ? forward_p + (size_t)(it - 1) * ntp : forward_p,
+                                    forward_p + (size_t)it * ntp,
+                                    it < nt - 1 ? forward_p + (size_t)(it + 1) * ntp : p1,
+                                    adj2,
+                                    grad_velocity, grad_density, flux_x, flux_z,
+                                    face_product_x, face_product_z,
+                                    verbose ? profile : NULL);
             tmp = adj0; adj0 = adj1; adj1 = adj2; adj2 = tmp;
         }
     }
-    if (verbose) printf("Variable-density forward and adjoint-gradient calculation finished.\n");
+    if (verbose) {
+        double gradient_total = profile[0] + profile[1] + profile[2] + profile[3];
+        printf("Variable-density timing (seconds):\n");
+        printf("  forward wavefield save:       %.6f\n", profile[4]);
+        printf("  forward propagation:          %.6f\n", profile[5]);
+        printf("  forward ABC/source/receivers: %.6f\n", profile[6]);
+        printf("  adjoint propagation:          %.6f\n", profile[7]);
+        printf("  adjoint ABC/residual source:  %.6f\n", profile[8]);
+        printf("  gradient forward face deriv.: %.6f\n", profile[0]);
+        printf("  gradient point terms:         %.6f\n", profile[1]);
+        printf("  gradient face products:       %.6f\n", profile[2]);
+        printf("  gradient face gather:         %.6f\n", profile[3]);
+        printf("  gradient total:               %.6f\n", gradient_total);
+        printf("Variable-density forward and adjoint-gradient calculation finished.\n");
+    }
 
 cleanup:
     free(velocity); free(density); free(bulk); free(buoyancy);
     free(face_bx); free(face_bz); free(flux_x); free(flux_z);
+    free(face_product_x); free(face_product_z);
+    free(velocity_acceleration_factor); free(density_acceleration_factor);
+    free(density_face_factor);
     free(w); free(t11); free(t12); free(t13);
     free(p0); free(p1); free(p2); free(adj0); free(adj1); free(adj2);
     free(wavelet); free(forward_p);
