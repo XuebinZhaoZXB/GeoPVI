@@ -66,7 +66,7 @@ def main():
     print(f"data shape: {synthetic.shape}")
     print(f"gradient shape: {gradient_velocity.shape}")
     print(f"objective: {0.5 * np.vdot(residual, residual):.6e}")
-    print(f"||legacy dJ/dv||_2: {np.linalg.norm(gradient_velocity):.6e}")
+    print(f"||dJ/dv||_2: {np.linalg.norm(gradient_velocity):.6e}")
     print(
         "all finite: "
         f"{bool(np.isfinite(synthetic).all() and np.isfinite(gradient_velocity).all())}"

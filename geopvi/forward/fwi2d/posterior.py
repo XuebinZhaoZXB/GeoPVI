@@ -109,7 +109,7 @@ class Posterior():
         data_syn, grad = aco2d.fwi(vel, self.data, paramfile = self.paramfile, data_mask = self.data_mask)
         grad = grad[self.mask]
         loss = 0.5 * np.sum((data_syn - self.data)**2)
-        return loss, -grad
+        return loss, grad
 
     def fwi(self, x):
         '''
