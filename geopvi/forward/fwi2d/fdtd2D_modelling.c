@@ -898,8 +898,13 @@ void backward_IO(int ntx, int ntz, int pml, int nt, int nt_interval, int it,
 			for(iz=pml;iz<ntz-pml;iz++)
 			{
 				if(run_fwi)
-					{grad[(iz-pml)*(ntx-2*pml)+(ix-pml)] += -2.0/powf(velp[iz*ntx+ix], 3) *
-							psave[(int)(it/nt_interval)*ntx*ntz+iz*ntx+ix]*p2[iz*ntx+ix]*nt_interval*dt;}
+				{
+					/* Gradient of 0.5*sum_t residual(t)^2.  nt_interval
+					   compensates the sampled imaging condition; no dt quadrature
+					   factor belongs to this discrete sample-sum objective. */
+					grad[(iz-pml)*(ntx-2*pml)+(ix-pml)] += 2.0f/powf(velp[iz*ntx+ix], 3) *
+							psave[(int)(it/nt_interval)*ntx*ntz+iz*ntx+ix]*p2[iz*ntx+ix]*nt_interval;
+				}
 				else
 					{grad[(iz-pml)*(ntx-2*pml)+(ix-pml)] += 
 							psave[(int)(it/nt_interval)*ntx*ntz+iz*ntx+ix]*p2[iz*ntx+ix]*nt_interval*dt;}
@@ -972,8 +977,8 @@ void wavefield_IO(int forward_or_backward, int ntx, int ntz, int pml, int nt, in
 			{
 				for(iz=pml;iz<ntz-pml;iz++)
 				{
-					grad[(iz-pml)*(ntx-2*pml)+(ix-pml)] += -2.0/powf(velp[iz*ntx+ix], 3) *
-							psave[it/nt_interval*ntx*ntz+iz*ntx+ix]*p2[iz*ntx+ix]*nt_interval*dt;
+					grad[(iz-pml)*(ntx-2*pml)+(ix-pml)] += 2.0f/powf(velp[iz*ntx+ix], 3) *
+							psave[it/nt_interval*ntx*ntz+iz*ntx+ix]*p2[iz*ntx+ix]*nt_interval;
 				}
 			}
 		}

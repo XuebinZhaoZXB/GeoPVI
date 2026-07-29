@@ -72,17 +72,24 @@ propagation it saves
 p_{tt}^n=\frac{p^{n+1}-2p^n+p^{n-1}}{\Delta t^2}
 \]
 
-at every `nt_interval`-th sample.  The returned legacy velocity accumulator
-uses
+at every `nt_interval`-th sample.  The returned velocity gradient uses
 
 \[
-g_v\mathrel{+}=-\frac{2}{v^3}p_{tt}\lambda\,
-                (nt_{interval}\,dt).
+g_v\mathrel{+}=\frac{2}{v^3}p_{tt}\lambda\,nt_{interval}.
 \]
 
-This documents the actual direct `aco2d.fwi` convention.  The higher-level
-`geopvi.forward.fwi2d.posterior.Posterior` applies an additional sign when it
-constructs its log-probability gradient.
+This is the gradient of the discrete sample-sum objective
+
+\[
+J=\frac12\sum_n(d_{syn}^n-d_{obs}^n)^2,
+\]
+
+so it contains no `dt` quadrature factor and has the same sign convention as
+`fwi_variable_density`.  `nt_interval` compensates the sampled legacy imaging
+condition; `nt_interval=1` evaluates it at every time step.  The higher-level
+`geopvi.forward.fwi2d.posterior.Posterior` passes this loss gradient to
+PyTorch, which supplies the negative sign when differentiating the log
+likelihood `-J/sigma**2`.
 
 `is_fwi=0` is a historical alternate mode that back-propagates the supplied
 data directly; it is not used by the standard least-squares demo.
@@ -186,17 +193,17 @@ Important limitations:
 - the wrapper does not perform the variable-density module's comprehensive
   geometry, CFL, length, and positivity validation;
 - the Liao setup is intended for `dx=dz`;
-- the legacy gradient convention is retained for compatibility rather than
-  rewritten as a new strict-discrete-adjoint implementation.
+- `nt_interval>1` samples rather than exactly recomputes the imaging
+  condition, so it is an approximation to the full sample-sum gradient.
 
 ## Validation and example
 
 The common regression suite checks the constant-density reduction of the new
 operator against this legacy forward solver before boundary arrivals and
-under grid refinement.  The performance benchmark also runs its complete
-forward and gradient calls.  The legacy velocity gradient itself is retained
-as a historical reference and does not currently have the same all-`Lc`
-strict directional-derivative suite as the variable-density gradients.
+under grid refinement.  It also checks the constant-density velocity gradient
+against a finite-difference directional derivative of the stated sample-sum
+objective.  The performance benchmark runs the complete forward and gradient
+calls.
 
 Run the small standalone demo from this directory:
 
