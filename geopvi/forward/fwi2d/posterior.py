@@ -269,10 +269,17 @@ class PosteriorVariableDensity():
                 velocity, density, self.data, paramfile=self.paramfile,
                 data_mask=self.data_mask
             )
+        for name, value in (('synthetic data', data_syn),
+                            ('velocity gradient', grad_velocity),
+                            ('density gradient', grad_density)):
+            if not np.all(np.isfinite(value)):
+                raise FloatingPointError('Nonfinite variable-density FWI %s' % name)
         residual = data_syn.astype(np.float64) - self.data.astype(np.float64)
         if self.data_mask is not None:
             residual *= self.data_mask.astype(np.float64)
         loss = 0.5 * np.dot(residual, residual)
+        if not np.isfinite(loss):
+            raise FloatingPointError('Nonfinite variable-density FWI loss')
         grad = np.concatenate((grad_velocity[self.velocity_mask],
                                grad_density[self.density_mask]))
         return loss, grad
@@ -313,12 +320,11 @@ class PosteriorVariableDensity():
 
     def log_prob(self, x):
         """Return the unnormalised log-posterior for each row of ``x``."""
-        if torch.isnan(x).any():
-            raise ValueError('NaN occurred in sample')
+        if not torch.isfinite(x).all():
+            raise FloatingPointError('Nonfinite variable-density posterior input samples')
         fwi_function = self.fwi if self.num_processes == 1 else self.fwi_parallel
         loss = ForwardModel.apply(x, fwi_function)
         logp = -loss / self.sigma**2
         if self.log_prior is not None:
             logp = logp + self.log_prior(x)
         return logp
-
