@@ -13,10 +13,22 @@
 
 #define pi 3.1415926
 
+static void backward_io_scaled(int ntx, int ntz, int pml, int nt,
+    int nt_interval, int it, float dx, float dz, float dt, float *velp,
+    float *p0, float *p1, float *p2, float *psave, float *record, float *grad,
+    int s_ix, int s_iz, int r_iz, int *r_ix, int r_n, int run_fwi,
+    const float *gradient_factor);
 
-void fwi_2D(char input_file[200], float *vel_inner, float *record_syn, float *record_obs, 
+
+int fwi_2D(char input_file[200], float *vel_inner, float *record_syn, float *record_obs,
 				float *grad, float *data_mask, int run_fwi, int verbose)
 {
+    int boundary;
+    if (read_boundary_options(input_file, &boundary)) return 1;
+    if (boundary == 1) {
+        return cpml_solve(input_file, vel_inner, record_syn, record_obs, grad,
+                          data_mask, run_fwi, verbose);
+    }
   	//============Time begin====================//
   	//============Time begin====================//
 	// clock_t start,finish;	// CPU time
@@ -69,7 +81,7 @@ void fwi_2D(char input_file[200], float *vel_inner, float *record_syn, float *re
 	if(laplace_solver != 0)
 	{
 		fprintf(stderr, "Only laplace_solver=0 (finite difference) is supported.\n");
-		return;
+		return 1;
 	}
 	Lc += 1;	// second order FD scheme +1
 	float *fd;	//finite difference coefficients
@@ -345,12 +357,17 @@ void fwi_2D(char input_file[200], float *vel_inner, float *record_syn, float *re
 	// MPI_Barrier(comm);
 	// MPI_Finalize();	
 	
-	// return 0;
+	return 0;
 }
 
-
-void forward_2D(char input_file[200], float *vel_inner, float *record_syn, int run_fwi, int verbose)
+int forward_2D(char input_file[200], float *vel_inner, float *record_syn, int run_fwi, int verbose)
 {
+    int boundary;
+    if (read_boundary_options(input_file, &boundary)) return 1;
+    if (boundary == 1) {
+        return cpml_solve(input_file, vel_inner, record_syn, NULL, NULL, NULL,
+                          run_fwi, verbose);
+    }
   	//============Time begin====================//
   	//============Time begin====================//
 	// clock_t start,finish;	// CPU time
@@ -403,7 +420,7 @@ void forward_2D(char input_file[200], float *vel_inner, float *record_syn, int r
 	if(laplace_solver != 0)
 	{
 		fprintf(stderr, "Only laplace_solver=0 (finite difference) is supported.\n");
-		return;
+		return 1;
 	}
 	Lc += 1;	// second order FD scheme +1
 	float *fd;	//finite difference coefficients
@@ -498,7 +515,8 @@ void forward_2D(char input_file[200], float *vel_inner, float *record_syn, int r
 	p0 = (float*)malloc(sizeof(float)*ntp);
 	p1 = (float*)malloc(sizeof(float)*ntp);
 	p2 = (float*)malloc(sizeof(float)*ntp);
-	psave = (float*)malloc(sizeof(float)*ntp*nt_save);
+	/* Data-only forward calls never consume a time history. */
+	psave = NULL;
 
 	float *record;
 	record = (float*)malloc(sizeof(float)*nt*rnmax);
@@ -506,7 +524,7 @@ void forward_2D(char input_file[200], float *vel_inner, float *record_syn, int r
 	memset(p0, 0, ntp*sizeof(float));
 	memset(p1, 0, ntp*sizeof(float));
 	memset(p2, 0, ntp*sizeof(float));
-	memset(psave, 0, ntp*nt_save*sizeof(float));
+	/* No history allocation or clearing on this path. */
 	memset(record, 0, nt*rnmax*sizeof(float));
 	// memset(record_syn, 0, ns*nt*rnmax*sizeof(float));
 
@@ -658,7 +676,7 @@ void forward_2D(char input_file[200], float *vel_inner, float *record_syn, int r
 	// MPI_Barrier(comm);
 	// MPI_Finalize();	
 	
-	// return 0;
+	return 0;
 }
 
 
@@ -676,7 +694,7 @@ void forward_aco_2D(int is, int nt, int ntx, int ntz, int ntp, int nx, int nz,
 
 	for(it=0; it<nt; it++)
 	{
-		fdtd_2d_calculate_p(ntx, ntz, Lc, pml, dx, dz, dt, fd, velp, p0, p1, p2);
+		fdtd_2d_calculate_p(ntx, ntz, Lc, pml, dx, dz, dt, fd, velp, p0, p1, p2, NULL);
 		
 		abc_for_p(ntx, ntz, Lc, pml, p0, p1, p2, w, t11, t12, t13);
 		forward_IO(ntx, ntz, pml, nt, nt_interval, it, dx, dz, dt, rik, velp, p0, p1, p2, psave, record,
@@ -708,15 +726,24 @@ void backward_aco_2D(int is, int nt, int ntx, int ntz, int ntp, int nx, int nz,
 	int i, it, ix, iz, ir;
 	int forward_or_backward = 2;
 	wavefield_initialization(ntx, ntz, p0, p1, p2);
+	/* Same rounded factor as backward_IO; avoid powf/division at every time
+	 * sample. Allocation failure falls back to the original expression. */
+	float *gradient_factor = run_fwi ? malloc((size_t)nx*nz*sizeof(float)) : NULL;
+	if (gradient_factor != NULL) {
+		#pragma omp parallel for private(ix,iz)
+		for (iz=0; iz<nz; ++iz)
+			for (ix=0; ix<nx; ++ix)
+				gradient_factor[iz*nx+ix] = 2.0f/powf(velp[(iz+pml)*ntx+ix+pml], 3);
+	}
 
 	char filename[100];
 
 	for(it=nt-1; it>=0; it--)
 	{
-		fdtd_2d_calculate_p(ntx, ntz, Lc, pml, dx, dz, dt, fd, velp, p0, p1, p2);
+		fdtd_2d_calculate_p(ntx, ntz, Lc, pml, dx, dz, dt, fd, velp, p0, p1, p2, NULL);
 		abc_for_p(ntx, ntz, Lc, pml, p0, p1, p2, w, t11, t12, t13);
-		backward_IO(ntx, ntz, pml, nt, nt_interval, it, dx, dz, dt, velp, p0, p1, p2, psave, record, grad,
-						ss[is].s_ix, ss[is].s_iz, ss[is].r_iz, ss[is].r_ix, ss[is].r_n, run_fwi);
+		backward_io_scaled(ntx, ntz, pml, nt, nt_interval, it, dx, dz, dt, velp, p0, p1, p2, psave, record, grad,
+						ss[is].s_ix, ss[is].s_iz, ss[is].r_iz, ss[is].r_ix, ss[is].r_n, run_fwi, gradient_factor);
 		updata_p(ntx, ntz, p0, p1, p2);
 
 		// if(it%100 == 0)
@@ -731,20 +758,25 @@ void backward_aco_2D(int is, int nt, int ntx, int ntz, int ntp, int nx, int nz,
 		// 	// fclose(fp);
 		// }
 	}
+	free(gradient_factor);
 }
 
 
-void fdtd_2d_calculate_p(int ntx, int ntz, int Lc, int pml, float dx, float dz, float dt, 
-					float *fd, float *velp, float *p0, float *p1, float *p2)
+void fdtd_2d_calculate_p(int ntx, int ntz, int Lc, int pml, float dx, float dz, float dt,
+					float *fd, float *velp, float *p0, float *p1, float *p2, Cpml2D *cpml)
 {
+	if (cpml != NULL) {
+		cpml_pressure_step(cpml, p0, p1, p2);
+		return;
+	}
 	int ix, iz, ic, ip;
 	float d2p_dx2, d2p_dz2;
 
-	// #pragma omp parallel for collapse(3) private(iz,ix, ic, d2p_dx2, d2p_dz2)
-	#pragma omp parallel for collapse(2) private(iz,ix, ic, d2p_dx2, d2p_dz2) 
-	for(ix=Lc; ix<ntx-Lc; ix++)
+	/* Row-major traversal; keep each cell's arithmetic order unchanged. */
+	#pragma omp parallel for private(iz,ix,ic,d2p_dx2,d2p_dz2)
+	for(iz=Lc; iz<ntz-Lc; iz++)
 	{
-		for(iz=Lc; iz<ntz-Lc; iz++)
+		for(ix=Lc; ix<ntx-Lc; ix++)
 		{
 			d2p_dx2 = fd[0]*p1[iz*ntx+ix];
 			for(ic=1; ic<Lc; ic++)
@@ -761,14 +793,20 @@ void fdtd_2d_calculate_p(int ntx, int ntz, int Lc, int pml, float dx, float dz, 
 }
 
 
-void abc_for_p(int ntx, int ntz, int Lc, int pml, float *p0, float *p1, float *p2, 
+void abc_for_p(int ntx, int ntz, int Lc, int pml, float *p0, float *p1, float *p2,
 					float *w, float *t11, float *t12, float *t13)
 {
-	int ix, iz, ic, ip;
-	#pragma omp parallel for collapse(2) private(iz,ix,ip)
-	for(ix=0; ix<ntx; ix++)
+	/* NULL weights select the already-integrated CPML pressure update.
+	 * Legacy and variable-density callers retain the original Liao equations. */
+	if (w == NULL) return;
+	int ix, iz, ip;
+	/* Top/bottom must finish before sides overwrite their corner overlap. */
+	#pragma omp parallel private(ix,iz,ip)
 	{
-		for(iz=Lc;iz<pml;iz++)
+	#pragma omp for collapse(2) nowait
+	for(iz=Lc;iz<pml;iz++)
+	{
+		for(ix=0; ix<ntx; ix++)
 		{
 			ip = iz*ntx+ix;
 			p2[ip] = w[iz-Lc]*(
@@ -781,10 +819,10 @@ void abc_for_p(int ntx, int ntz, int Lc, int pml, float *p0, float *p1, float *p
 		}
 	}
 
-	#pragma omp parallel for collapse(2) private(iz,ix,ip)
-	for(ix=0; ix<ntx; ix++)
+	#pragma omp for collapse(2)
+	for(iz=ntz-pml; iz<ntz-Lc; iz++)
 	{	
-		for(iz=ntz-pml; iz<ntz-Lc; iz++)
+		for(ix=0; ix<ntx; ix++)
 		{
 			ip = iz*ntx+ix;
 			p2[ip] = w[ntz-Lc-iz-1]*(
@@ -797,7 +835,7 @@ void abc_for_p(int ntx, int ntz, int Lc, int pml, float *p0, float *p1, float *p
 		}
 	}
 
-	#pragma omp parallel for collapse(2) private(iz,ix,ip)
+	#pragma omp for collapse(2) nowait
 	for(iz=0;iz<ntz;iz++)
 	{
 		for(ix=Lc; ix<pml;ix++)
@@ -813,7 +851,7 @@ void abc_for_p(int ntx, int ntz, int Lc, int pml, float *p0, float *p1, float *p
 		}
 	}
 
-	#pragma omp parallel for collapse(2) private(iz,ix,ip)
+	#pragma omp for collapse(2)
 	for(iz=0;iz<ntz;iz++)
 	{	
 		for(ix=ntx-pml;ix<ntx-Lc;ix++)
@@ -828,6 +866,7 @@ void abc_for_p(int ntx, int ntz, int Lc, int pml, float *p0, float *p1, float *p
 							+(1.0-w[ntx-Lc-ix-1])*p2[ip];
 		}
 	}	
+	} /* parallel: both side strips are complete */
 }
 
 void forward_IO(int ntx, int ntz, int pml, int nt, int nt_interval, int it, 
@@ -841,12 +880,12 @@ void forward_IO(int ntx, int ntz, int pml, int nt, int nt_interval, int it,
 	p2[s_iz*ntx+s_ix] += rik[it]*dt*dt*velp[s_iz*ntx+s_ix]*velp[s_iz*ntx+s_ix];
 
 	//=======save forward wavefield to calculate gradient=========//
-	if(it%nt_interval == 0)
+	if(psave != NULL && it%nt_interval == 0)
 	{
-		#pragma omp parallel for collapse(2) private(iz, ix)
-		for(ix=0;ix<ntx;ix++)
+		#pragma omp parallel for private(iz, ix)
+		for(iz=0;iz<ntz;iz++)
 		{
-			for(iz=0;iz<ntz;iz++)
+			for(ix=0;ix<ntx;ix++)
 			{	
 				if(run_fwi)
 					{psave[(int)(it/nt_interval)*ntx*ntz+iz*ntx+ix] =
@@ -858,7 +897,6 @@ void forward_IO(int ntx, int ntz, int pml, int nt, int nt_interval, int it,
 	}
 
 	//==============Record seismograms=============//
-	#pragma omp parallel for private(ir)
 	for(ir=0; ir<r_n; ir++)
 	{
 		// ir = r_id[ix];
@@ -869,15 +907,14 @@ void forward_IO(int ntx, int ntz, int pml, int nt, int nt_interval, int it,
 	}
 }
 
-void backward_IO(int ntx, int ntz, int pml, int nt, int nt_interval, int it, 
+static void backward_io_scaled(int ntx, int ntz, int pml, int nt, int nt_interval, int it,
 				float dx, float dz, float dt, float *velp, 
 				float *p0, float *p1, float *p2, float *psave, float *record, float *grad,
-				int s_ix, int s_iz, int r_iz, int *r_ix, int r_n, int run_fwi)
+				int s_ix, int s_iz, int r_iz, int *r_ix, int r_n, int run_fwi, const float *gradient_factor)
 {
 	int ix, iz, ip, ir;
 
 	//==============Back propagate the residual record=============//
-	#pragma omp parallel for private(ir)
 	for(ir=0; ir<r_n; ir++)
 	{
 		// ir = r_id[ix];
@@ -892,17 +929,18 @@ void backward_IO(int ntx, int ntz, int pml, int nt, int nt_interval, int it,
 	//=======Calculate gradient=========//
 	if(it%nt_interval==0)
 	{
-		#pragma omp parallel for collapse(2) private(iz, ix)
-		for(ix=pml;ix<ntx-pml;ix++)
+		#pragma omp parallel for private(iz, ix)
+		for(iz=pml;iz<ntz-pml;iz++)
 		{
-			for(iz=pml;iz<ntz-pml;iz++)
+			for(ix=pml;ix<ntx-pml;ix++)
 			{
 				if(run_fwi)
 				{
 					/* Gradient of 0.5*sum_t residual(t)^2.  nt_interval
 					   compensates the sampled imaging condition; no dt quadrature
 					   factor belongs to this discrete sample-sum objective. */
-					grad[(iz-pml)*(ntx-2*pml)+(ix-pml)] += 2.0f/powf(velp[iz*ntx+ix], 3) *
+					grad[(iz-pml)*(ntx-2*pml)+(ix-pml)] += (gradient_factor ? gradient_factor[(iz-pml)*(ntx-2*pml)+ix-pml] :
+						2.0f/powf(velp[iz*ntx+ix], 3)) *
 							psave[(int)(it/nt_interval)*ntx*ntz+iz*ntx+ix]*p2[iz*ntx+ix]*nt_interval;
 				}
 				else
@@ -911,6 +949,15 @@ void backward_IO(int ntx, int ntz, int pml, int nt, int nt_interval, int it,
 			}
 		}
 	}
+}
+
+void backward_IO(int ntx, int ntz, int pml, int nt, int nt_interval, int it,
+				float dx, float dz, float dt, float *velp,
+				float *p0, float *p1, float *p2, float *psave, float *record, float *grad,
+				int s_ix, int s_iz, int r_iz, int *r_ix, int r_n, int run_fwi)
+{
+	backward_io_scaled(ntx, ntz, pml, nt, nt_interval, it, dx, dz, dt, velp,
+		p0, p1, p2, psave, record, grad, s_ix, s_iz, r_iz, r_ix, r_n, run_fwi, NULL);
 }
 
 void wavefield_IO(int forward_or_backward, int ntx, int ntz, int pml, int nt, int nt_interval, int it, 
@@ -990,10 +1037,10 @@ void updata_p(int ntx, int ntz, float *p0, float *p1, float *p2)
 {
 	int ix, iz;
 
-	#pragma omp parallel for collapse(2) private(iz,ix)
-	for(ix=0;ix<ntx; ix++)
+	#pragma omp parallel for private(iz,ix)
+	for(iz=0;iz<ntz;iz++)
 	{
-		for(iz=0;iz<ntz;iz++)
+		for(ix=0;ix<ntx; ix++)
 		{
 			p0[iz*ntx+ix] = p1[iz*ntx+ix];
 			p1[iz*ntx+ix] = p2[iz*ntx+ix];
@@ -1006,9 +1053,9 @@ void wavefield_initialization(int ntx, int ntz, float *p0, float *p1, float *p2)
 {
 	int ix, iz;
 
-	#pragma omp parallel for collapse(2) private(iz,ix)
-	for(ix=0; ix<ntx; ix++)
-		for(iz=0; iz<ntz; iz++)
+	#pragma omp parallel for private(iz,ix)
+	for(iz=0; iz<ntz; iz++)
+		for(ix=0; ix<ntx; ix++)
 		{
 			p0[iz*ntx+ix] = 0.0;
 			p1[iz*ntx+ix] = 0.0;

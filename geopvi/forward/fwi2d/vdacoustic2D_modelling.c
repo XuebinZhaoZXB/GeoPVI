@@ -6,6 +6,8 @@
 
 #include "fdtd2D_modelling.h"
 #include "vdacoustic2D_modelling.h"
+#include "vdcpml2D.h"
+#include "cpml2D.h"
 
 /*
  * Variable-density acoustic pressure equation, using the source convention of
@@ -13,7 +15,8 @@
  *
  *   p_tt = rho*v^2 div(1/rho grad(p)) + v^2 s.
  *
- * The outer boundary is the legacy Liao/mixed ABC implemented by abc_for_p().
+ * boundary_type=0 retains the legacy Liao/mixed ABC implemented by abc_for_p().
+ * boundary_type=1 dispatches to vdcpml2D.c (including its discrete transpose).
  */
 
 static void *vd_malloc(size_t count, size_t size, const char *name)
@@ -64,7 +67,7 @@ static int vd_validate_parameters(int nx, int nz, int pml0, int input_lc,
  * pair of cell-centred buoyancies.  Their matching adjoint divergence
  * makes -G^T B G a conservative, symmetric discrete operator.
  */
-static int vd_staggered_coefficients(int radius, float *derivative,
+int vd_staggered_coefficients(int radius, float *derivative,
                                      float *interpolation)
 {
     static const float d[6][6] = {
@@ -97,7 +100,7 @@ static int vd_staggered_coefficients(int radius, float *derivative,
     return 1;
 }
 
-static int vd_extend_models(int nx, int nz, int pml, int ntx, int ntz,
+int vd_extend_models(int nx, int nz, int pml, int ntx, int ntz,
                             const float *vel_inner, const float *rho_inner,
                             float *velocity, float *density, float *bulk,
                             float *buoyancy, float *vmax)
@@ -214,7 +217,7 @@ static float vd_face_buoyancy_z(int ip, int ntx, int radius,
     return face_buoyancy;
 }
 
-static void vd_prepare_face_buoyancies(int ntx, int ntz, int radius,
+void vd_prepare_face_buoyancies(int ntx, int ntz, int radius,
                                        const float *interpolation,
                                        const float *buoyancy,
                                        float *face_bx, float *face_bz)
@@ -567,9 +570,10 @@ cleanup:
     free(pressure);
 }
 
-void forward_vd_2D(char input_file[200], const float *vel_inner,
+int forward_vd_2D(char input_file[200], const float *vel_inner,
                    const float *rho_inner, float *record_syn, int verbose)
 {
+    int status = 1, boundary;
     int nx, nz, pml0, input_lc, laplace_solver, ns, nt, ds, ns0;
     int depths, depthr, nr, dr, nr0, nt_interval;
     int halo, pml, ntx, ntz, ntp, is, it, ir;
@@ -580,12 +584,16 @@ void forward_vd_2D(char input_file[200], const float *vel_inner,
     float *w = NULL, *t11 = NULL, *t12 = NULL, *t13 = NULL;
     float *p0 = NULL, *p1 = NULL, *p2 = NULL, *wavelet = NULL;
 
+    if (read_boundary_options(input_file, &boundary)) return 1;
+    if (boundary == 1) return vdcpml_solve(input_file, vel_inner, rho_inner, record_syn,
+        NULL, NULL, NULL, NULL, 0, NULL, NULL, NULL, verbose);
+
     read_parameters(input_file, &nx, &nz, &pml0, &input_lc, &laplace_solver,
                     &ns, &nt, &ds, &ns0, &depths, &depthr, &nr, &dr, &nr0,
                     &nt_interval, &dx, &dz, &dt, &f0);
     if (!vd_validate_parameters(nx, nz, pml0, input_lc, laplace_solver, ns, nt, ds, ns0, depths,
-                                depthr, nr, dr, nr0, dx, dz, dt, f0)) return;
-    if (!vd_staggered_coefficients(input_lc, derivative, interpolation)) return;
+                                depthr, nr, dr, nr0, dx, dz, dt, f0)) return 1;
+    if (!vd_staggered_coefficients(input_lc, derivative, interpolation)) return 1;
 
     /* G and its adjoint divergence each span input_lc cells, so the composed
      * conservative operator needs a 2*Lc halo.  The remaining pml0 cells are
@@ -594,7 +602,7 @@ void forward_vd_2D(char input_file[200], const float *vel_inner,
     pml = pml0 + halo;
     ntx = nx + 2 * pml;
     ntz = nz + 2 * pml;
-    if ((size_t)ntx > ((size_t)-1) / (size_t)ntz) return;
+    if ((size_t)ntx > ((size_t)-1) / (size_t)ntz) return 1;
     ntp = ntx * ntz;
 
     velocity = vd_malloc(ntp, sizeof(float), "extended velocity");
@@ -641,18 +649,21 @@ void forward_vd_2D(char input_file[200], const float *vel_inner,
         }
     }
 
+    status = 0;
 cleanup:
     free(velocity); free(density); free(bulk); free(buoyancy);
     free(face_bx); free(face_bz); free(flux_x); free(flux_z);
     free(w); free(t11); free(t12); free(t13);
     free(p0); free(p1); free(p2); free(wavelet);
+    return status;
 }
 
-void fwi_vd_2D(char input_file[200], const float *vel_inner,
+int fwi_vd_2D(char input_file[200], const float *vel_inner,
                const float *rho_inner, float *record_syn,
                const float *record_obs, float *grad_velocity,
                float *grad_density, const float *data_mask, int verbose)
 {
+    int status = 1, boundary;
     int nx, nz, pml0, input_lc, laplace_solver, ns, nt, ds, ns0;
     int depths, depthr, nr, dr, nr0, nt_interval;
     int halo, pml, ntx, ntz, ntp, is, it, ir;
@@ -670,19 +681,23 @@ void fwi_vd_2D(char input_file[200], const float *vel_inner,
     float *adj0 = NULL, *adj1 = NULL, *adj2 = NULL;
     double profile[10] = {0.0};
 
+    if (read_boundary_options(input_file, &boundary)) return 1;
+    if (boundary == 1) return vdcpml_solve(input_file, vel_inner, rho_inner, record_syn,
+        record_obs, grad_velocity, grad_density, data_mask, 0, NULL, NULL, NULL, verbose);
+
     read_parameters(input_file, &nx, &nz, &pml0, &input_lc, &laplace_solver,
                     &ns, &nt, &ds, &ns0, &depths, &depthr, &nr, &dr, &nr0,
                     &nt_interval, &dx, &dz, &dt, &f0);
     if (!vd_validate_parameters(nx, nz, pml0, input_lc, laplace_solver, ns, nt, ds, ns0, depths,
-                                depthr, nr, dr, nr0, dx, dz, dt, f0)) return;
-    if (!vd_staggered_coefficients(input_lc, derivative, interpolation)) return;
+                                depthr, nr, dr, nr0, dx, dz, dt, f0)) return 1;
+    if (!vd_staggered_coefficients(input_lc, derivative, interpolation)) return 1;
     inv_dt2 = 1.0f / (dt * dt);
 
     halo = 2 * input_lc;
     pml = pml0 + halo;
     ntx = nx + 2 * pml;
     ntz = nz + 2 * pml;
-    if ((size_t)ntx > ((size_t)-1) / (size_t)ntz) return;
+    if ((size_t)ntx > ((size_t)-1) / (size_t)ntz) return 1;
     ntp = ntx * ntz;
     wavefield_count = (size_t)ntp * (size_t)nt;
 
@@ -826,6 +841,7 @@ void fwi_vd_2D(char input_file[200], const float *vel_inner,
         printf("Variable-density forward and adjoint-gradient calculation finished.\n");
     }
 
+    status = 0;
 cleanup:
     free(velocity); free(density); free(bulk); free(buoyancy);
     free(face_bx); free(face_bz); free(flux_x); free(flux_z);
@@ -835,14 +851,16 @@ cleanup:
     free(w); free(t11); free(t12); free(t13);
     free(p0); free(p1); free(p2); free(adj0); free(adj1); free(adj2);
     free(wavelet); free(forward_p);
+    return status;
 }
 
-void vd_wavefield_snapshots_2D(char input_file[200], const float *vel_inner,
+int vd_wavefield_snapshots_2D(char input_file[200], const float *vel_inner,
                                const float *rho_inner, float *record_syn,
                                const float *record_obs, int snapshot_count,
                                const int *snapshot_steps, float *forward_snapshots,
                                float *adjoint_snapshots, int verbose)
 {
+    int status = 1, boundary;
     int nx, nz, pml0, input_lc, laplace_solver, ns, nt, ds, ns0;
     int depths, depthr, nr, dr, nr0, nt_interval;
     int halo, pml, ntx, ntz, ntp, is, it, ir, snap;
@@ -854,15 +872,20 @@ void vd_wavefield_snapshots_2D(char input_file[200], const float *vel_inner,
     float *p0 = NULL, *p1 = NULL, *p2 = NULL, *wavelet = NULL;
     float *adj0 = NULL, *adj1 = NULL, *adj2 = NULL;
 
+    if (read_boundary_options(input_file, &boundary)) return 1;
+    if (boundary == 1) return vdcpml_solve(input_file, vel_inner, rho_inner, record_syn,
+        record_obs, NULL, NULL, NULL, snapshot_count, snapshot_steps,
+        forward_snapshots, adjoint_snapshots, verbose);
+
     read_parameters(input_file, &nx, &nz, &pml0, &input_lc, &laplace_solver,
                     &ns, &nt, &ds, &ns0, &depths, &depthr, &nr, &dr, &nr0,
                     &nt_interval, &dx, &dz, &dt, &f0);
     if (!vd_validate_parameters(nx, nz, pml0, input_lc, laplace_solver, ns, nt, ds, ns0, depths,
                                 depthr, nr, dr, nr0, dx, dz, dt, f0) || ns != 1 ||
-        snapshot_count <= 0 || !snapshot_steps || !forward_snapshots || !adjoint_snapshots) return;
+        snapshot_count <= 0 || !snapshot_steps || !forward_snapshots || !adjoint_snapshots) return 1;
     for (snap = 0; snap < snapshot_count; ++snap)
-        if (snapshot_steps[snap] < 0 || snapshot_steps[snap] >= nt) return;
-    if (!vd_staggered_coefficients(input_lc, derivative, interpolation)) return;
+        if (snapshot_steps[snap] < 0 || snapshot_steps[snap] >= nt) return 1;
+    if (!vd_staggered_coefficients(input_lc, derivative, interpolation)) return 1;
     halo = 2 * input_lc;
     pml = pml0 + halo;
     ntx = nx + 2 * pml;
@@ -942,9 +965,11 @@ void vd_wavefield_snapshots_2D(char input_file[200], const float *vel_inner,
         }
     }
     if (verbose) printf("Variable-density wavefield snapshots finished.\n");
+    status = 0;
 cleanup:
     free(velocity); free(density); free(bulk); free(buoyancy);
     free(face_bx); free(face_bz); free(flux_x); free(flux_z);
     free(w); free(t11); free(t12); free(t13);
     free(p0); free(p1); free(p2); free(adj0); free(adj1); free(adj2); free(wavelet);
+    return status;
 }

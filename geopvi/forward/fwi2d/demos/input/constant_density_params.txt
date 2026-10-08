@@ -1,4 +1,4 @@
--- nx
+-- nx (19 pairs default to CPML; optional pair 20: 0=Liao, 1=CPML)
 81
 -- nz
 51

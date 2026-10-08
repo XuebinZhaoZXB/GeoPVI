@@ -1,18 +1,26 @@
-# FWI2D constant- versus variable-density benchmark
+# Solver timing
 
-This benchmark compares the complete Python calls for the legacy
-constant-density and variable-density implementations.  The gradient calls
-include forward modelling, saved-wavefield allocation, adjoint propagation,
-and gradient accumulation.  The constant-density call returns one model
-gradient; the variable-density call returns velocity and density gradients.
+From `geopvi/forward/fwi2d`, after building the extension:
 
 ```bash
-cd geopvi/forward/fwi2d
-python setup.py build_ext --inplace
-OMP_NUM_THREADS=2 python benchmarks/benchmark_constant_vs_variable.py
+OMP_NUM_THREADS=4 python benchmarks/benchmark_constant_vs_variable.py --boundary cpml --repeats 5
+OMP_NUM_THREADS=4 python benchmarks/benchmark_constant_vs_variable.py --boundary liao --repeats 5
 ```
 
-The workload is `110 x 250`, `nt=2000`, five shots, 250 receivers per shot,
-`pml0=10`, and `Lc=3`.  Results are written to the ignored `output/`
-directory.  `reference_results.json` records the validated two-thread result
-from 22 July 2026; runtime values are hardware and system-load dependent.
+The script compares constant- and variable-density forward calls and
+forward-plus-gradient calls through the Python API. All four are warmed up.
+The default workload is (nz,nx)=(110,250), 2,000 steps, five shots,
+250 receivers, ten absorbing cells and radius 3.
+
+Options: `--boundary cpml|liao` (default CPML), `--repeats N` (default 3),
+`--quick` for a small smoke test, and `--output-dir PATH`
+(default `benchmarks/output/`).
+
+Outputs are `parameters_<boundary>.txt` and `benchmark_results_<boundary>.json`,
+including timing samples, medians, ratios and configuration. Reusing an output
+directory overwrites that boundary's results.
+
+Use the same compute node, CPU allocation and affinity for comparisons.
+Recorded OpenMP settings are requested values, not measured team sizes.
+The script checks finite outputs; accuracy checks belong to the
+[test suite](../tests/README.md).

@@ -21,6 +21,7 @@ def _write_parameters(path, lc=3):
         31, 31, 8, lc, 0, 1, 150, 1, 10, 10, 10, 3, 5, 8, 1,
         10.0, 10.0, 0.001, 18.0,
     ]
+    values.append(0)  # Explicit Liao: retain this legacy regression/benchmark.
     with path.open("w", encoding="ascii") as stream:
         for index, value in enumerate(values):
             stream.write(f"-- parameter {index}\n{value}\n")
@@ -166,6 +167,7 @@ def test_all_supported_lc_values_have_consistent_joint_gradients(tmp_path):
             nx, nz, 8, lc, 0, 1, 120, 1, 15, 15, 15, 1, 1, 20, 1,
             10.0, 10.0, 0.001, 18.0,
         ]
+        values.append(0)  # This test covers the legacy Liao path.
         with parameter_file.open("w", encoding="ascii") as stream:
             for index, value in enumerate(values):
                 stream.write(f"-- parameter {index}\n{value}\n")

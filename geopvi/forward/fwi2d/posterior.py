@@ -64,6 +64,13 @@ def prepare_fwi_parameters(paramfile, config):
         f.write(config.get('FWI','dt')+'\n')
         f.write('--Dominant frequency (f0)\n')
         f.write(config.get('FWI','f0')+'\n')
+        # Omission writes 19 pairs: both native solvers now default to CPML.
+        if config.has_option('FWI', 'boundary_type'):
+            boundary = config.getint('FWI', 'boundary_type')
+            if boundary not in (0, 1):
+                raise ValueError('boundary_type must be 0 (Liao) or 1 (CPML)')
+            f.write('--boundary_type: 0=Liao, 1=CPML\n')
+            f.write(str(boundary)+'\n')
 
     return
 

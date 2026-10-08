@@ -21,6 +21,7 @@ def _write_parameters(path):
         31, 31, 8, 3, 0, 1, 150, 1, 10, 10, 10, 3, 5, 8, 1,
         10.0, 10.0, 0.001, 18.0,
     ]
+    values.append(0)  # Explicit Liao: retain this legacy regression/benchmark.
     with path.open("w", encoding="ascii") as stream:
         for index, value in enumerate(values):
             stream.write(f"-- parameter {index}\n{value}\n")

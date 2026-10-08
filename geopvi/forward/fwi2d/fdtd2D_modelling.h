@@ -1,3 +1,4 @@
+#include "cpml2D.h"
 // extern "C"
 struct Source
 {
@@ -19,8 +20,8 @@ void backward_aco_2D(int is, int nt, int ntx, int ntz, int ntp, int nx, int nz,
 					float *w, float *t11, float *t12, float *t13, float *fd, float *rik, float *velp,
 					float *p0, float *p1, float *p2, float *psave, float *record,
 					float *grad, struct Source ss[], int run_fwi);
-void fdtd_2d_calculate_p(int ntx, int ntz, int Lc, int pml, float dx, float dz, float dt, 
-					float *fd, float *velp, float *p0, float *p1, float *p2);
+void fdtd_2d_calculate_p(int ntx, int ntz, int Lc, int pml, float dx, float dz, float dt,
+					float *fd, float *velp, float *p0, float *p1, float *p2, Cpml2D *cpml);
 void abc_for_p(int ntx, int ntz, int Lc, int pml, float *p0, float *p1, float *p2, 
 					float *w, float *t11, float *t12, float *t13);
 void wavefield_IO(int forward_or_backward, int ntx, int ntz, int pml, int nt, int nt_interval, int it, 
