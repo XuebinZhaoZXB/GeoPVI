@@ -178,8 +178,9 @@ class Posterior():
 class PosteriorVariableDensity():
     """Bayesian posterior for joint velocity/density acoustic FWI.
 
-    Each row of ``x`` is ordered as ``[velocity[velocity_mask],
-    density[density_mask]]``.  The two masks may differ, which makes it
+    Each row of ``x`` is ordered according to ``parameter_order``.  The
+    supported orders are ``'velocity_density'`` (the historical default)
+    and ``'density_velocity'``.  The two masks may differ, which makes it
     possible to fix (for example) the water-layer velocity and density
     independently.
     """
@@ -187,7 +188,8 @@ class PosteriorVariableDensity():
     def __init__(self, data, config, vel_fixed=1950.0, density_fixed=1000.0,
                  sigma=0.1, num_processes=1, log_prior=None,
                  velocity_mask=None, density_mask=None, data_mask=None,
-                 paramfile='input_params.txt'):
+                 paramfile='input_params.txt',
+                 parameter_order='velocity_density'):
         """Create a variable-density posterior.
 
         Parameters are analogous to :class:`Posterior`, except that separate
@@ -220,6 +222,11 @@ class PosteriorVariableDensity():
         )
         self.ndim = (np.count_nonzero(self.velocity_mask) +
                      np.count_nonzero(self.density_mask))
+        valid_orders = ('velocity_density', 'density_velocity')
+        if parameter_order not in valid_orders:
+            valid = ', '.join(valid_orders)
+            raise ValueError(f"parameter_order must be one of: {valid}")
+        self.parameter_order = parameter_order
 
         if data_mask is None:
             self.data_mask = None
@@ -262,10 +269,15 @@ class PosteriorVariableDensity():
     def _unpack_models(self, x):
         """Expand concatenated active parameters into full physical models."""
         n_velocity = np.count_nonzero(self.velocity_mask)
+        n_density = np.count_nonzero(self.density_mask)
         velocity = self.vel_fixed.copy()
         density = self.density_fixed.copy()
-        velocity[self.velocity_mask] = x[:n_velocity]
-        density[self.density_mask] = x[n_velocity:]
+        if self.parameter_order == 'velocity_density':
+            velocity[self.velocity_mask] = x[:n_velocity]
+            density[self.density_mask] = x[n_velocity:n_velocity + n_density]
+        else:  # density_velocity
+            density[self.density_mask] = x[:n_density]
+            velocity[self.velocity_mask] = x[n_density:n_density + n_velocity]
         return velocity, density
 
     def solver(self, models):
@@ -287,8 +299,12 @@ class PosteriorVariableDensity():
         loss = 0.5 * np.dot(residual, residual)
         if not np.isfinite(loss):
             raise FloatingPointError('Nonfinite variable-density FWI loss')
-        grad = np.concatenate((grad_velocity[self.velocity_mask],
-                               grad_density[self.density_mask]))
+        if self.parameter_order == 'velocity_density':
+            grad = np.concatenate((grad_velocity[self.velocity_mask],
+                                   grad_density[self.density_mask]))
+        else:  # density_velocity
+            grad = np.concatenate((grad_density[self.density_mask],
+                                   grad_velocity[self.velocity_mask]))
         return loss, grad
 
     def fwi(self, x):
