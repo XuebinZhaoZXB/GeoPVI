@@ -132,7 +132,7 @@ class Constr2Real(nn.Module):
 class Linear(nn.Module):
     """
     Pytorch implementation for a linear transform: z = u + Lx
-    If this flow is used for ADVI, then the covariance matrix is \Sigma = L^T.L
+    If this flow is used for ADVI, then the covariance matrix is \Sigma = L.L^T.
     """
     def __init__(self, dim, kernel = 'diagonal', mask = None, param = None, trainable = True):
         """
@@ -140,7 +140,13 @@ class Linear(nn.Module):
             diagonal: only diagonal of L is considered, ignore correlations - mean field ADVI
             structured: part of disgonals are considered - PSVI
             fullrank: all elements of L - full rank ADVI
-        mask: If PSVI is used, we need to define a mask specificing which off diagonals are considered
+        mask: If PSVI is used, this can be either:
+            - the legacy boolean diagonal mask, which specifies selected
+              lower diagonals; or
+            - a dictionary with ``rows`` and ``cols`` arrays.  Each pair
+              (rows[k], cols[k]) specifies one strictly lower-triangular
+              nonzero of L.  The latter form supports arbitrary sparse
+              Cholesky patterns without constructing a dense matrix.
         param: Initial parameters provided for Linear flow parameters
                 mainly used for FWI where high frequency inversion is initialised using the results from low frequency inversion
         trainable: 
@@ -153,18 +159,59 @@ class Linear(nn.Module):
         self.kernel = kernel
         self.u = nn.Parameter(torch.zeros(dim))
         self.diag = nn.Parameter(torch.zeros(dim))
+        self.edge_pattern = False
         if kernel == 'fullrank':
             self.non_diag = nn.Parameter(torch.zeros(int(dim * (dim - 1)/2)))
         elif kernel == 'diagonal':
             self.non_diag = None
         elif kernel == 'structured':
-            if mask is None:
+            if isinstance(mask, dict):
+                required_keys = {'rows', 'cols'}
+                missing_keys = required_keys.difference(mask)
+                if missing_keys:
+                    missing = ', '.join(sorted(missing_keys))
+                    raise ValueError(f"Sparse Cholesky mask dictionary is missing required key(s): {missing}")
+                rows = np.asarray(mask['rows'], dtype = int).reshape(-1)
+                cols = np.asarray(mask['cols'], dtype = int).reshape(-1)
+                if rows.size != cols.size:
+                    raise ValueError("Sparse Cholesky pattern rows and cols must have the same length")
+                if rows.size == 0:
+                    raise ValueError("Sparse Cholesky pattern must contain at least one off-diagonal entry")
+                if np.any(rows < 0) or np.any(rows >= dim) or np.any(cols < 0) or np.any(cols >= dim):
+                    raise ValueError("Sparse Cholesky pattern contains indices outside the flow dimension")
+                if np.any(rows <= cols):
+                    raise ValueError("Sparse Cholesky pattern must contain strictly lower-triangular entries")
+                pairs = np.column_stack((rows, cols))
+                if np.unique(pairs, axis = 0).shape[0] != pairs.shape[0]:
+                    raise ValueError("Sparse Cholesky pattern contains duplicate entries")
+                self.edge_pattern = True
+                self.register_buffer('edge_rows', torch.from_numpy(rows.astype(np.int64)))
+                self.register_buffer('edge_cols', torch.from_numpy(cols.astype(np.int64)))
+                self.non_diag = nn.Parameter(torch.zeros(rows.size))
+            elif mask is None:
                 self.mask = np.ones([1, dim])
                 self.mask[0, -1] = 0.
+                self.offset = (self.mask == 0).sum(axis = 1)
+                self.non_diag = nn.Parameter(torch.zeros(self.mask.shape))
             else:
+                if not isinstance(mask, np.ndarray):
+                    raise TypeError("Structured Linear mask must be None, a boolean numpy array, or a dictionary with rows/cols")
+                if mask.ndim != 2 or mask.shape[1] != dim:
+                    raise ValueError("Legacy structured mask must have shape (number_of_diagonals, dim)")
+                if mask.dtype != bool:
+                    raise TypeError("Legacy structured mask must have boolean dtype")
+                # The legacy diagonal implementation can only represent masks
+                # of the form [True, ..., True, False, ..., False].  This is
+                # the source-to-target shift used in forward() below.
+                n_valid = mask.sum(axis = 1)
+                if np.any(n_valid == 0) or np.any(n_valid == dim):
+                    raise ValueError("Each legacy mask row must select a nonzero proper lower diagonal")
+                for row, count in zip(mask, n_valid):
+                    if not (np.all(row[:count]) and not np.any(row[count:])):
+                        raise ValueError("Each legacy mask row must contain leading True values followed by trailing False values")
                 self.mask = mask
-            self.offset = (self.mask == 0).sum(axis = 1)
-            self.non_diag = nn.Parameter(torch.zeros(self.mask.shape))
+                self.offset = (self.mask == 0).sum(axis = 1)
+                self.non_diag = nn.Parameter(torch.zeros(self.mask.shape))
 
         # Load previous results: can be used to resume from previous run or for multiscale FWI 
         if param is not None:
@@ -181,8 +228,9 @@ class Linear(nn.Module):
                     #     TODO: consider param only provides part of off-diagonal elements
                     #     raise ValueError("Shape of mask and parameter does not match!")
                 elif kernel == 'structured':
-                    if param[self.dim*2:].size == self.mask.size:
-                        self.non_diag = nn.Parameter(torch.from_numpy(param[self.dim*2:].reshape(self.mask.shape)))
+                    n_offdiag = self.non_diag.numel()
+                    if param[self.dim*2:].size == n_offdiag:
+                        self.non_diag = nn.Parameter(torch.from_numpy(param[self.dim*2:].reshape(self.non_diag.shape)))
                     else:
                     #     # TODO: consider param only provides part of off-diagonal blocks
                         raise ValueError("Shape of mask and parameter does not match!")
@@ -210,12 +258,20 @@ class Linear(nn.Module):
         elif self.kernel == 'diagonal':
             z = self.u + diag * x
         elif self.kernel == 'structured':
-            # TODO: use torch.sparse to represent L
-            # Current torch version used does not support torch.sparse.spdiags
-            tmp = x[:,None,:] * self.non_diag
-            tmp1 = torch.zeros(tmp.shape)
-            tmp1[:, np.sort(self.mask, axis = 1)] = tmp[:, self.mask]
-            z = self.u + diag * x + tmp1.sum(axis = 1)
+            if self.edge_pattern:
+                # Each sparse edge contributes L[row, col] * x[col].
+                # index_add preserves the requested sparse pattern
+                # without requiring a dense dim-by-dim matrix.
+                tmp = torch.zeros_like(x)
+                tmp.index_add_(1, self.edge_rows, x[:, self.edge_cols] * self.non_diag)
+                z = self.u + diag * x + tmp
+            else:
+                # TODO: use torch.sparse to represent L
+                # Current torch version used does not support torch.sparse.spdiags
+                tmp = x[:,None,:] * self.non_diag
+                tmp1 = torch.zeros(tmp.shape)
+                tmp1[:, np.sort(self.mask, axis = 1)] = tmp[:, self.mask]
+                z = self.u + diag * x + tmp1.sum(axis = 1)
         log_det = torch.log(diag).sum().repeat(x.shape[0])
         return z, log_det
 
@@ -235,8 +291,14 @@ class Linear(nn.Module):
             # TODO: whether use triangule solve or save inverse of L in advance to reduce computational cost
             # Current torch version used doesn't support torch.sparse.spdiags
             # thus the inverse for this case is implemented using scipy.sparse.diags
-            sparse_diagonals = torch.vstack([diag, self.non_diag]).detach().numpy()
-            L = sparse.diags(sparse_diagonals, -self.offset, shape = (self.dim, self.dim))
+            if self.edge_pattern:
+                rows = np.concatenate((np.arange(self.dim), self.edge_rows.detach().cpu().numpy()))
+                cols = np.concatenate((np.arange(self.dim), self.edge_cols.detach().cpu().numpy()))
+                values = np.concatenate((diag.detach().cpu().numpy(), self.non_diag.detach().cpu().numpy()))
+                L = sparse.coo_matrix((values, (rows, cols)), shape = (self.dim, self.dim)).tocsr()
+            else:
+                sparse_diagonals = torch.vstack([diag, self.non_diag]).detach().numpy()
+                L = sparse.diags(sparse_diagonals, -self.offset, shape = (self.dim, self.dim))
             x = TriangularSolve.apply(z - self.u, L)
             # raise NotImplementedError("Inverse transform not supported for sturctured kernel")
         log_det = - torch.log(diag).sum().repeat(x.shape[0])
