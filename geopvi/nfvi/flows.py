@@ -577,44 +577,81 @@ class ActNorm(nn.Module):
         return x, log_det
 
 
-class ReverseOrder(nn.Module):
-    """
-    Reverse the order of the input vector
-    """
-    def __init__(self, dim):
-        super().__init__()
-        self.index = np.linspace(dim - 1,0, dim, dtype = 'int')
-
-    def forward(self, x, train = True):
-        z = x[:, self.index]
-        log_det = torch.zeros(x.shape[0])
-        return z, log_det
-
-    def inverse(self, z):
-        # inverse transform is the same as forward transform
-        x = z[:, self.index]
-        log_det = torch.zeros(x.shape[0])
-        return x, log_det
-
-
 class Permute(nn.Module):
     """
-    Random permute (or re-order) model parameters to change the role of 
-    copying and transforming in the coupling layer
+    Fixed permutation of vector coordinates.
+
+    Parameters
+    ----------
+    dim : int
+        Number of coordinates.
+    order : array-like, optional
+        Explicit input-index order.  The forward transform is ``z = x[:, order]``.
+        For example, for a concatenated ``[velocity; density]`` vector with N
+        cells, ``order = [N, ..., 2N-1, 0, ..., N-1]`` swaps the two blocks
+        without reversing the spatial order within either block.
+    seed : int, optional
+        Seed for a reproducible random permutation.  If omitted, the existing
+        NumPy global random state is used.  Only used when ``order`` is omitted.
+
+    The permutation and its inverse are registered buffers, so they follow the
+    module across devices and are included in state_dict checkpoints.  A
+    permutation has zero log absolute determinant.
     """
-    def __init__(self, dim):
+    def __init__(self, dim, order=None, seed=None):
         super().__init__()
-        self.index = np.random.permutation(dim)
-    
+        if not isinstance(dim, (int, np.integer)) or dim <= 0:
+            raise ValueError("dim must be a positive integer")
+        self.dim = int(dim)
+
+        if order is not None:
+            if seed is not None:
+                raise ValueError("seed can only be used when order is omitted")
+            permutation = np.asarray(order)
+            if permutation.ndim != 1 or permutation.size != self.dim:
+                raise ValueError("order must be a one-dimensional permutation of length dim")
+            if not np.issubdtype(permutation.dtype, np.integer):
+                if not np.all(np.isfinite(permutation)) or not np.all(permutation == np.floor(permutation)):
+                    raise ValueError("order must contain integer indices")
+            permutation = permutation.astype(np.int64, copy=False)
+            if not np.array_equal(np.sort(permutation), np.arange(self.dim)):
+                raise ValueError("order must contain every index from 0 to dim - 1 exactly once")
+        else:
+            if seed is None:
+                permutation = np.random.permutation(self.dim)
+            else:
+                permutation = np.random.RandomState(seed).permutation(self.dim)
+
+        inverse_permutation = np.argsort(permutation)
+        self.register_buffer('index', torch.as_tensor(permutation, dtype=torch.long))
+        self.register_buffer('inverse_index', torch.as_tensor(inverse_permutation, dtype=torch.long))
+
     def forward(self, x, train = True):
-        z = x[:, self.index]
-        log_det = torch.zeros(x.shape[0])
+        if x.ndim != 2 or x.shape[1] != self.dim:
+            raise ValueError(f"Permute expected input shape (batch, {self.dim}), got {tuple(x.shape)}")
+        z = x.index_select(1, self.index)
+        log_det = x.new_zeros(x.shape[0])
         return z, log_det
 
     def inverse(self, z):
-        x = z[:, np.argsort(self.index)]
-        log_det = torch.zeros(x.shape[0])
+        if z.ndim != 2 or z.shape[1] != self.dim:
+            raise ValueError(f"Permute expected input shape (batch, {self.dim}), got {tuple(z.shape)}")
+        x = z.index_select(1, self.inverse_index)
+        log_det = z.new_zeros(z.shape[0])
         return x, log_det
+
+
+class ReverseOrder(Permute):
+    """
+    Convenience alias for ``Permute(..., order=reversed_indices)``.
+
+    This reverses *all* coordinates.  For a concatenated ``[velocity; density]``
+    vector this also reverses the spatial order within each parameter block, so
+    it is not the same as swapping the two blocks while preserving grid order.
+    """
+    def __init__(self, dim):
+        order = np.arange(dim - 1, -1, -1, dtype=np.int64)
+        super().__init__(dim=dim, order=order)
 
 
 class NSF_SAR(nn.Module):
